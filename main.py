@@ -1,4 +1,4 @@
-import st as st
+import streamlit as st
 import pandas as pd
 import os
 import re
@@ -19,17 +19,23 @@ def get_engine():
         if db_url.startswith("postgres://"):
             db_url = db_url.replace("postgres://", "postgresql://", 1)
         try:
-            return create_engine(db_url, pool_pre_ping=True)
+            engine = create_engine(db_url, pool_pre_ping=True)
+            with engine.connect() as conn:
+                conn.execute(text("CREATE TABLE IF NOT EXISTS merchants_playground (id SERIAL PRIMARY KEY, data JSONB)"))
+                conn.execute(text("CREATE TABLE IF NOT EXISTS pg_settings (type TEXT, value TEXT)"))
+                conn.commit()
+            return engine
         except: return None
     return None
 
 db_engine = get_engine()
+
+# OpenAI Klient
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Funktion til at analysere billede med OpenAI
 def analyze_image_with_ai(image_bytes):
     if not os.getenv("OPENAI_API_KEY"):
-        return {"Company Name": "FEJL: Ingen API Key fundet i Railway"}
+        return {"Company Name": "FEJL: Ingen OpenAI Key i Railway"}
     
     base64_image = base64.b64encode(image_bytes).decode('utf-8')
     
@@ -40,7 +46,7 @@ def analyze_image_with_ai(image_bytes):
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Extract business card info into JSON. Use these keys: Company Name, CIF Number VAT, Kontaktperson, Email, Phone number, Website, Town, Address. Return ONLY JSON."},
+                        {"type": "text", "text": "Extract business card info into JSON. Use these keys exactly: Company Name, CIF Number VAT, Kontaktperson, Email, Phone number, Website, Town, Address. Return ONLY raw JSON."},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                     ],
                 }
@@ -75,11 +81,11 @@ def load_options():
     defaults = {
         "regions": ["Andalucía", "Cataluña", "Madrid", "Valenciana", "Galicia", "Canarias", "Baleares"],
         "areas": ["Costa del Sol", "Costa Blanca", "Costa Brava", "Mallorca", "Ibiza"],
-        "titles": ["Ejer", "Manager", "Marketingchef", "Andet"],
+        "titles": ["Ejer", "Manager", "Marketingchef", "E-commerce Manager", "Salgschef", "Andet"],
         "agents": ["Brian", "Agent 1", "Agent 2"],
         "lead_types": ["Inbound", "Outbound", "AI Card Scan 🤖", "Reference"],
         "memberships": ["Ingen", "Gratis", "Basis", "Premium", "VIP"],
-        "advertising": ["Ingen", "Standard", "Premium"],
+        "advertising": ["Ingen", "Standard Profil", "Premium Eksponering"],
         "status": ["Ny", "Dialog", "Vundet", "Tabt", "Opfølgning"],
         "brancher": ["Ejendomsmægler", "Restaurant", "Håndværker", "Advokat", "Butik", "Turisme", "Andet"],
         "underbrancher": ["Boligsalg", "Udlejning", "Tapas", "Take-away", "VVS", "El"],
@@ -155,10 +161,11 @@ def lead_popup(idx):
             upd['Kontaktperson'] = st.text_input("Navn", value=row.get('Kontaktperson'))
             upd['Titel'] = st.selectbox("Titel", opts['titles'], index=opts['titles'].index(row.get('Titel')) if row.get('Titel') in opts['titles'] else 0)
             upd['Email'] = st.text_input("E-mail", value=row.get('Email'))
+            upd['Mobilnr'] = st.text_input("Mobil (Vigtig)", value=row.get('Mobilnr'))
         with c2:
             upd['Phone number'] = st.text_input("Kontor Tlf", value=row.get('Phone number'))
-            upd['Mobilnr'] = st.text_input("Mobil", value=row.get('Mobilnr'))
             upd['WhatsApp'] = st.text_input("WhatsApp", value=row.get('WhatsApp'))
+            upd['Telegram'] = st.text_input("Telegram", value=row.get('Telegram'))
             upd['Website'] = st.text_input("Website URL", value=row.get('Website'))
 
     with t2:
@@ -167,10 +174,12 @@ def lead_popup(idx):
             upd['Region'] = st.selectbox("Region", opts['regions'], index=opts['regions'].index(row.get('Region')) if row.get('Region') in opts['regions'] else 0)
             upd['Area'] = st.selectbox("Område/Kyst", opts['areas'], index=opts['areas'].index(row.get('Area')) if row.get('Area') in opts['areas'] else 0)
             upd['Town'] = st.text_input("By", value=row.get('Town'))
+            upd['Address'] = st.text_input("Vej & Nr.", value=row.get('Address'))
         with c2:
             cur_br = [x.strip() for x in str(row.get('Brancher')).split(',')] if row.get('Brancher') else []
             upd['Brancher'] = ", ".join(st.multiselect("Brancher", opts['brancher'], default=[x for x in cur_br if x in opts['brancher']]))
-            upd['Address'] = st.text_input("Vej & Nr.", value=row.get('Address'))
+            cur_lang = [x.strip() for x in str(row.get('Languages')).split(',')] if row.get('Languages') else []
+            upd['Languages'] = ", ".join(st.multiselect("Sprog", opts['sprog'], default=[x for x in cur_lang if x in opts['sprog']]))
 
     with t3:
         c1, c2 = st.columns(2)
@@ -185,6 +194,7 @@ def lead_popup(idx):
     with t4:
         upd['Business Description'] = st.text_area("Kort Pitch", value=row.get('Business Description'), height=100)
         upd['Description'] = st.text_area("Annoncetekst", value=row.get('Description'), height=200)
+        upd['Tracking_URL'] = st.text_input("Tracking URL (QR)", value=row.get('Tracking_URL'))
 
     with t5:
         upd['Noter'] = st.text_area("Logbog", value=row.get('Noter'), height=200)
@@ -212,7 +222,7 @@ with st.sidebar:
     with st.expander("Scan visitkort med AI"):
         cam = st.camera_input("Tag billede")
         if cam:
-            with st.spinner("AI analyserer billedet..."):
+            with st.spinner("AI analyserer..."):
                 ai_data = analyze_image_with_ai(cam.read())
                 new_r = {c: "" for c in MASTER_COLS}
                 new_r.update(ai_data)
@@ -220,17 +230,15 @@ with st.sidebar:
                 new_r['Leadtype'] = "AI Card Scan 🤖"
                 st.session_state.df_leads = pd.concat([st.session_state.df_leads, pd.DataFrame([new_r])], ignore_index=True)
                 save_db(st.session_state.df_leads)
-                st.success("Lead oprettet fra AI scanning!")
                 st.rerun()
 
     st.header("🎯 Kampagne Filter")
     f_br = st.multiselect("Branche:", opts['brancher'])
-    f_reg = st.multiselect("Region:", opts['regions'])
     f_town = st.multiselect("By:", sorted([t for t in st.session_state.df_leads['Town'].unique() if t]))
     f_st = st.multiselect("Status:", opts['status'])
 
-    with st.expander("🛠️ Dropdowns"):
-        t_sel = st.selectbox("Type:", ["brancher", "regions", "areas", "titles", "agents", "lead_types", "memberships", "advertising", "status", "sprog"])
+    with st.expander("🛠️ Administrer Dropdowns"):
+        t_sel = st.selectbox("Vælg:", ["brancher", "regions", "areas", "titles", "agents", "lead_types", "memberships", "advertising", "status", "sprog"])
         v_new = st.text_input("Nyt navn:")
         if st.button("Tilføj") and v_new: add_option(t_sel, v_new); st.rerun()
 
@@ -247,7 +255,6 @@ with st.sidebar:
 st.title("💼 CRM Playground")
 df_v = st.session_state.df_leads.copy()
 if f_br: df_v = df_v[df_v['Brancher'].apply(lambda x: any(b in x for b in f_br))]
-if f_reg: df_v = df_v[df_v['Region'].isin(f_reg)]
 if f_town: df_v = df_v[df_v['Town'].isin(f_town)]
 if f_st: df_v = df_v[df_v['Status on lead'].isin(f_st)]
 
@@ -257,4 +264,4 @@ if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, c
 sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="single-row", on_select="rerun", height=600)
 if sel.selection.rows:
     real_idx = df_v.index[sel.selection.rows[0]]
-    lead_popup(real_idx) 
+    lead_popup(real_idx)
