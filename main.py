@@ -12,45 +12,55 @@ import json
 # --- 1. KONFIGURATION ---
 st.set_page_config(page_title="Business Master CRM AI", layout="wide", page_icon="🎯")
 
-# --- 2. DATABASE MOTOR (MED AUTOMATISK REPARATION) ---
+# --- 2. DATABASE MOTOR (SKUDSIKKER INITIALISERING) ---
 @st.cache_resource
 def get_engine():
     db_url = os.getenv("DATABASE_URL")
-    if db_url:
-        if db_url.startswith("postgres://"):
-            db_url = db_url.replace("postgres://", "postgresql://", 1)
-        try:
-            engine = create_engine(db_url, pool_pre_ping=True)
-            # DATABASE REPARATION LOGIK
-            with engine.begin() as conn:
-                # 1. Sikr leads tabel
-                conn.execute(text("CREATE TABLE IF NOT EXISTS merchants_playground (id SERIAL PRIMARY KEY, data JSONB)"))
-                # 2. Sikr bruger tabel
-                conn.execute(text("CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, role TEXT)"))
-                
-                # 3. FIX PG_SETTINGS: Tjek om den er ødelagt
-                try:
-                    conn.execute(text("SELECT type FROM pg_settings LIMIT 1"))
-                except:
-                    st.warning("Reparerer indstillingstabel...")
-                    conn.execute(text("DROP TABLE IF EXISTS pg_settings"))
+    if not db_url:
+        return None
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+    
+    try:
+        engine = create_engine(db_url, pool_pre_ping=True)
+        
+        # SIKKER INITIALISERING AF TABELLER
+        with engine.begin() as conn:
+            # Opret tabeller hvis de ikke findes
+            conn.execute(text("CREATE TABLE IF NOT EXISTS merchants_playground (id SERIAL PRIMARY KEY, data JSONB)"))
+            conn.execute(text("CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, role TEXT)"))
+            
+            # Tjek specifikt om pg_settings har de rigtige kolonner uden at bryde transaktionen
+            check_table = conn.execute(text(
+                "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'pg_settings')"
+            )).fetchone()[0]
+            
+            if check_table:
+                check_col = conn.execute(text(
+                    "SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_name='pg_settings' AND column_name='type')"
+                )).fetchone()[0]
+                if not check_col:
+                    conn.execute(text("DROP TABLE pg_settings"))
                     conn.execute(text("CREATE TABLE pg_settings (id SERIAL PRIMARY KEY, type TEXT, value TEXT)"))
-                
-                # Opret admin hvis tom
-                res = conn.execute(text("SELECT COUNT(*) FROM users")).fetchone()
-                if res[0] == 0:
-                    u, p = os.getenv("APP_USER", "admin"), os.getenv("APP_PASSWORD", "mgm2024")
-                    conn.execute(text("INSERT INTO users VALUES (:u, :p, 'admin')"), {"u": u, "p": p})
-            return engine
-        except Exception as e:
-            st.error(f"Databasefejl: {e}")
-    return None
+            else:
+                conn.execute(text("CREATE TABLE pg_settings (id SERIAL PRIMARY KEY, type TEXT, value TEXT)"))
+
+            # Opret admin hvis tom
+            res = conn.execute(text("SELECT COUNT(*) FROM users")).fetchone()
+            if res[0] == 0:
+                u, p = os.getenv("APP_USER", "admin"), os.getenv("APP_PASSWORD", "mgm2024")
+                conn.execute(text("INSERT INTO users VALUES (:u, :p, 'admin')"), {"u": u, "p": p})
+        return engine
+    except Exception as e:
+        st.error(f"Database start-fejl: {e}")
+        return None
 
 db_engine = get_engine()
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# SIKKER DATABASE-SKRIVNING
+# SIKKER DATABASE-HANDLING (Hver handling er sin egen transaktion)
 def db_execute(query, params=None):
+    if not db_engine: return False
     try:
         with db_engine.begin() as conn:
             conn.execute(text(query), params or {})
@@ -67,13 +77,13 @@ def analyze_image_with_ai(image_bytes):
         response = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": [
-                {"type": "text", "text": "Extract info into JSON: Company Name, CIF Number VAT, Kontaktperson, Email, Phone number, Website, Town, Address."},
+                {"type": "text", "text": "Extract business card info into JSON. Keys: Company Name, CIF Number VAT, Kontaktperson, Email, Phone number, Website, Town, Address."},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
             ]}],
             response_format={ "type": "json_object" }
         )
         return json.loads(response.choices[0].message.content)
-    except: return {"Company Name": "AI Fejl"}
+    except: return {"Company Name": "AI Scanning Fejl"}
 
 # --- 4. LOGIN ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
@@ -99,7 +109,7 @@ if not st.session_state.authenticated:
         st.button("LOG IND", type="primary", use_container_width=True, on_click=check_login)
     st.stop()
 
-# --- 5. MASTER STRUKTUR ---
+# --- 5. MASTER DATA DEFINITIONER ---
 MASTER_COLS = [
     'Date created', 'Company Name', 'CIF Number VAT', 'Brancher', 'Underbrancher', 'Region', 'Area', 'Town', 
     'Postal Code', 'Address', 'Exact Location', 'Kontaktperson', 'Titel', 'Email', 
@@ -115,14 +125,14 @@ def load_options():
         "agents": ["Brian", "Olga"],
         "brancher": ["Ejendomsmægler", "Restaurant", "Håndværker", "Advokat", "Butik", "Turisme", "Andet"],
         "underbrancher": ["Boligsalg", "Udlejning", "Tapas", "Take-away", "VVS", "El", "Tømrer", "Murer", "Rengøring"],
-        "status": ["Ny", "Dialog", "Vundet", "Tabt", "Opfølgning"],
+        "regions": ["Andalucía", "Cataluña", "Madrid", "Valenciana", "Galicia", "Castilla y León", "País Vasco", "Canarias", "Murcia", "Aragón", "Extremadura", "Baleares", "Asturias", "Navarra", "Cantabria", "La Rioja"],
+        "areas": ["Costa del Sol", "Costa Blanca", "Costa Brava", "Costa de la Luz", "Mallorca", "Ibiza", "Madrid City", "Barcelona City"],
+        "status": ["Ny", "Dialog", "Vundet", "Tabt", "Opfølgning", "Pause"],
         "sprog": ["Dansk", "Engelsk", "Spansk", "Svensk", "Norsk", "Tysk"],
-        "regions": ["Andalucía", "Cataluña", "Madrid", "Valenciana", "Galicia", "Canarias", "Baleares"],
-        "areas": ["Costa del Sol", "Costa Blanca", "Costa Brava", "Mallorca", "Ibiza"],
-        "titles": ["CEO", "Ejer", "Manager"],
-        "memberships": ["Ingen", "Basis", "Premium", "VIP"],
-        "advertising": ["Ingen", "Standard", "Premium"],
-        "lead_types": ["Inbound", "Outbound", "AI Scan"]
+        "titles": ["CEO", "Ejer", "Manager", "Marketingchef"],
+        "memberships": ["Ingen", "Gratis", "Basis", "Premium", "VIP"],
+        "advertising": ["Ingen", "Standard Profil", "Premium Eksponering", "Banner kampagne"],
+        "lead_types": ["Inbound", "Outbound", "AI Scan", "Reference"]
     }
     if db_engine:
         try:
@@ -133,7 +143,7 @@ def load_options():
         except: pass
     return defaults
 
-# --- 6. RENSE MOTOR ---
+# --- 6. RENSE-MOTOR ---
 def force_clean(df):
     if df.empty: return pd.DataFrame(columns=MASTER_COLS)
     df = df.loc[:, ~df.columns.duplicated()].copy()
@@ -193,7 +203,7 @@ def lead_popup(idx):
     with t3:
         c1, c2 = st.columns(2)
         with c1:
-            upd['Status on lead'] = st.selectbox("Status", opts['status'], index=opts['status'].index(row.get('Status on lead')) if row.get('Status on lead') in opts['status'] else 0, key=f"s_{idx}")
+            upd['Status on lead'] = st.selectbox("Pipeline Status", opts['status'], index=opts['status'].index(row.get('Status on lead')) if row.get('Status on lead') in opts['status'] else 0, key=f"s_{idx}")
             upd['Membership'] = st.selectbox("Medlemskab", opts['memberships'], index=opts['memberships'].index(row.get('Membership')) if row.get('Membership') in opts['memberships'] else 0, key=f"m_{idx}")
             upd['Advertising'] = st.selectbox("Annonceprofil", opts['advertising'], index=opts['advertising'].index(row.get('Advertising')) if row.get('Advertising') in opts['advertising'] else 0, key=f"ad_{idx}")
         with c2:
@@ -204,7 +214,7 @@ def lead_popup(idx):
                 upd[f] = st.date_input(f, value=d_v, key=f"{f}_{idx}").strftime('%d/%m/%Y')
     with t4:
         upd['Business Description'] = st.text_area("Kort Pitch", value=row.get('Business Description'), height=100, key=f"bd_{idx}")
-        upd['Description'] = st.text_area("Annoncetekst", value=row.get('Description'), height=200, key=f"de_{idx}")
+        upd['Description'] = st.text_area("Lang Annoncetekst", value=row.get('Description'), height=200, key=f"de_{idx}")
         upd['Tracking_URL'] = st.text_input("QR Tracking URL", value=row.get('Tracking_URL'), key=f"tr_{idx}")
     with t5:
         upd['Noter'] = st.text_area("CRM Logbog", value=row.get('Noter'), height=200, key=f"no_{idx}")
@@ -224,7 +234,7 @@ with st.sidebar:
     st.header(f"👤 {st.session_state.username}")
     with st.expander("📸 AI Scanner"):
         if cam := st.camera_input("Scan visitkort"):
-            with st.spinner("AI tænker..."):
+            with st.spinner("Analyse..."):
                 ai = analyze_image_with_ai(cam.read())
                 nr = {c: "" for c in MASTER_COLS}
                 nr.update(ai); nr['Date created'] = date.today().strftime('%d/%m/%Y')
@@ -234,29 +244,31 @@ with st.sidebar:
     if st.session_state.user_role == "admin":
         st.divider()
         with st.expander("🛠️ Dropdown Administration"):
-            for label, key in [("Agent", "agents"), ("Branche", "brancher"), ("Underbranche", "underbrancher"), ("Region", "regions"), ("Område", "areas"), ("Status", "status"), ("Sprog", "sprog"), ("Titel", "titles"), ("Medlemskab", "memberships"), ("Annonceprofil", "advertising"), ("Lead Kilde", "lead_types")]:
+            labels = [("Agent", "agents"), ("Branche", "brancher"), ("Underbranche", "underbrancher"), ("Region", "regions"), ("Område", "areas"), ("Status", "status"), ("Sprog", "sprog"), ("Titel", "titles"), ("Medlemskab", "memberships"), ("Annonceprofil", "advertising"), ("Kilde", "lead_types")]
+            for label, key in labels:
+                st.markdown(f"**{label}**")
                 v_new = st.text_input(f"Ny {label}:", key=f"a_{key}")
-                if st.button(f"Tilføj {label}", key=f"b_{key}"):
+                if st.button(f"Tilføj til {label}", key=f"b_{key}"):
                     if db_execute("INSERT INTO pg_settings (type, value) VALUES (:t, :v)", {"t": key, "v": v_new}):
-                        st.success("Tilføjet!"); st.rerun()
+                        st.success("Gemt!"); st.rerun()
             
             if st.button("🚨 NULSTIL DB", type="secondary"):
                 with db_engine.begin() as conn: conn.execute(text("DROP TABLE IF EXISTS merchants_playground"))
                 st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS); st.rerun()
 
     st.divider()
-    st.subheader("🎯 Filtre")
+    st.subheader("🎯 Kampagne Filtre")
     f_ag = st.multiselect("Agent:", opts['agents'])
     f_st = st.multiselect("Status:", opts['status'])
     f_br = st.multiselect("Branche:", opts['brancher'])
     f_re = st.multiselect("Region:", opts['regions'])
-    f_town = st.multiselect("By:", sorted([t for t in st.session_state.df_leads['Town'].unique() if t]))
+    f_to = st.multiselect("By:", sorted([t for t in st.session_state.df_leads['Town'].unique() if t]))
 
     if st.button("➕ OPRET MANUELT", type="primary", use_container_width=True):
         nr = {c: "" for c in MASTER_COLS}; nr['Date created'] = date.today().strftime('%d/%m/%Y'); nr['Agent'] = st.session_state.username
         st.session_state.df_leads = pd.concat([st.session_state.df_leads, pd.DataFrame([nr])], ignore_index=True)
         save_db(st.session_state.df_leads); st.rerun()
-    st.download_button("📥 Eksport", st.session_state.df_leads.to_csv(index=False), "master.csv", use_container_width=True)
+    st.download_button("📥 Master Export", st.session_state.df_leads.to_csv(index=False), "master.csv", use_container_width=True)
     if st.button("🚪 Log ud"): st.session_state.authenticated = False; st.rerun()
 
 # --- 9. DASHBOARD ---
@@ -266,7 +278,7 @@ if f_ag: df_v = df_v[df_v['Agent'].isin(f_ag)]
 if f_st: df_v = df_v[df_v['Status on lead'].isin(f_st)]
 if f_re: df_v = df_v[df_v['Region'].isin(f_re)]
 if f_br: df_v = df_v[df_v['Brancher'].apply(lambda x: any(b in x for b in f_br))]
-if f_town: df_v = df_v[df_v['Town'].isin(f_town)]
+if f_to: df_v = df_v[df_v['Town'].isin(f_to)]
 search = st.text_input("🔍 Søg...")
 if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
 
