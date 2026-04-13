@@ -4,30 +4,13 @@ import os
 import re
 import sqlalchemy
 from sqlalchemy import create_engine, text
-from datetime import datetime, date
 import base64
+from datetime import datetime, date
 
 # --- 1. KONFIGURATION ---
-st.set_page_config(page_title="Affiliate CRM Master", layout="wide")
+st.set_page_config(page_title="Lead Database Master", layout="wide", page_icon="🎯")
 
-# ADGANGSKODE
-correct_pw = os.getenv("APP_PASSWORD", "mgm2024")
-
-if "auth" not in st.session_state:
-    st.session_state.auth = False
-
-if not st.session_state.auth:
-    st.title("🔒 CRM Master - Adgangskontrol")
-    pwd_input = st.text_input("Indtast adgangskode", type="password")
-    if st.button("Åbn Database", type="primary"):
-        if pwd_input == correct_pw:
-            st.session_state.auth = True
-            st.rerun()
-        else:
-            st.error("❌ Forkert adgangskode")
-    st.stop()
-
-# --- 2. DATABASE MOTOR ---
+# --- 2. DATABASE FORBINDELSE ---
 @st.cache_resource
 def get_engine():
     db_url = os.getenv("DATABASE_URL")
@@ -37,8 +20,8 @@ def get_engine():
         try:
             engine = create_engine(db_url, pool_pre_ping=True)
             with engine.connect() as conn:
-                conn.execute(text("CREATE TABLE IF NOT EXISTS merchants (id SERIAL PRIMARY KEY, data JSONB)"))
-                conn.execute(text("CREATE TABLE IF NOT EXISTS settings (type TEXT, value TEXT)"))
+                conn.execute(text("CREATE TABLE IF NOT EXISTS leads_data (id SERIAL PRIMARY KEY, data JSONB)"))
+                conn.execute(text("CREATE TABLE IF NOT EXISTS lead_settings (type TEXT, value TEXT)"))
                 conn.commit()
             return engine
         except: return None
@@ -46,192 +29,173 @@ def get_engine():
 
 db_engine = get_engine()
 
-# --- 3. MASTER DEFINITIONER ---
+# --- 3. NY MASTER STRUKTUR (DINE FELTER) ---
 MASTER_COLS = [
-    'Date Added', 'Kategori', 'MID', 'Virksomhed', 'Website', 'Programnavn', 
-    'Produkter', 'Segment', 'Salgs % (sats)', 'EPC', 'Lead/Fast (sats)', 
-    'Trafik', 'Feed?', 'Fornavn', 'Efternavn', 'Mail', 'Tlf', 'Kontaktet', 
-    'Aff. status', 'Kontakt dato', 'Network', 'Land', 'Ticketnr', 'Dialog', 'Opflg. dato', 'Noter', 'Fil_Navn', 'Fil_Data'
+    'Company Name', 'CIF Number VAT', 'Business Category', 'Business Description',
+    'Area', 'Town', 'Postal Code', 'Exact Location', 'Website', 'Email', 
+    'Phone number', 'Address', 'Work time', 'Languages', 'Description', 
+    'Date created', 'Date for follow up', 'Status on lead', 'Advertising', 
+    'Pricelist', 'Agent', 'Membership', 'Leadtype', 'Logo_File', 'Gallery_Data'
 ]
 
 # --- 4. DROPDOWN LOGIK ---
 def load_options():
     defaults = {
-        "aff_status": ["Godkendt", "Afvist", "Ikke ansøgt", "Lukket ned", "Afventer", "Pause"],
-        "networks": ["Partner-ads", "addrevenue", "Adtraction", "Tradetracker", "Awin", "GJ", "Daisycon", "Shopnello", "TradeDoubler", "Webigans"],
-        "lands": ["DK", "SE", "NO", "FI", "ES", "DE", "UK", "US", "NL"],
-        "dialogs": ["Ikke kontakte", "Affiliate Audit", "Dialog i gang", "Oplæg sendt", "Infomail sendt", "Cold Mail", "Nystartet", "Kontaktet", "Mediebureau", "Vundet", "Tabt", "Følg op 1 mdr", "Følg op 3 mdr", "Følg op 6 mdr", "Droppet", "Call"]
+        "categories": ["Håndværker", "Restaurant", "Butik", "Service", "Andet"],
+        "areas": ["Costa del Sol", "Malaga", "Marbella", "Fuengirola", "Estepona"],
+        "languages": ["Dansk", "Engelsk", "Spansk", "Tysk", "Svensk", "Norsk"],
+        "lead_status": ["Ny", "Dialog i gang", "Oplæg sendt", "Vundet", "Tabt", "Pause"],
+        "memberships": ["Gratis", "Basis", "Premium", "VIP"],
+        "lead_types": ["Inbound (Form)", "Outbound (Cold)", "Reference", "Messe"],
+        "agents": ["Brian", "Agent 1", "Agent 2"]
     }
     if db_engine:
         try:
-            df_opt = pd.read_sql("SELECT * FROM settings", db_engine)
+            df_opt = pd.read_sql("SELECT * FROM lead_settings", db_engine)
             for key in defaults.keys():
                 stored = df_opt[df_opt['type'] == key]['value'].tolist()
-                defaults[key] = sorted(list(set(defaults[key] + stored)))
+                if stored: defaults[key] = sorted(list(set(defaults[key] + stored)))
         except: pass
     return defaults
 
-def add_dropdown_option(t, v):
-    if db_engine and v:
-        with db_engine.connect() as conn:
-            conn.execute(text("INSERT INTO settings (type, value) VALUES (:t, :v)"), {"t":t, "v":v})
-            conn.commit()
+# --- 5. RENSE- OG MERGE MOTOR ---
+def get_safe_date(val):
+    if not val or str(val).lower() in ['nat', 'nan', 'none', '', '00:00:00']: return date.today()
+    try: return pd.to_datetime(val, dayfirst=True, errors='coerce').date() or date.today()
+    except: return date.today()
 
-# --- 5. RENSE- OG DATO-MOTOR ---
-def get_safe_date_for_picker(val):
-    """Sikrer at kalenderen aldrig modtager NaT. Returnerer dags dato som fallback."""
-    if not val or pd.isna(val) or str(val).lower() in ['nat', 'nan', 'none', '', '00:00:00']:
-        return date.today()
-    try:
-        # Prøv at konvertere til datetime
-        dt = pd.to_datetime(val, dayfirst=True, errors='coerce')
-        # Hvis resultatet er NaT (not a time), returner dags dato
-        if pd.isna(dt):
-            return date.today()
-        return dt.date()
-    except:
-        return date.today()
-
-def robust_repair(df):
+def force_clean_leads(df):
     if df.empty: return pd.DataFrame(columns=MASTER_COLS)
-    df = df.loc[:, ~df.columns.duplicated()].copy()
-    ren = {'Merchant': 'Virksomhed', 'Programnavn': 'Programnavn', 'Product Count': 'Produkter', 'EPC (nøgletal)': 'EPC', 'Status': 'Aff. status', 'Dato': 'Kontakt dato', 'Aff. Status': 'Aff. status'}
-    df = df.rename(columns=ren)
     df = df.loc[:, ~df.columns.duplicated()].copy()
     df = df.astype(str).replace(['NaT', 'nan', 'None', '00:00:00'], '')
     return df.reindex(columns=MASTER_COLS, fill_value="")
 
-def save_to_db(df):
+def save_leads_db(df):
     if db_engine:
-        df = robust_repair(df)
-        df['MATCH_KEY'] = df['Virksomhed'].apply(lambda x: re.sub(r'[^a-z0-9]', '', str(x).lower()))
-        df.loc[df['Virksomhed'] == '', 'MATCH_KEY'] = df['Programnavn'].apply(lambda x: re.sub(r'[^a-z0-9]', '', str(x).lower()))
+        df = force_clean_leads(df)
+        df['MATCH_KEY'] = df['Company Name'].apply(lambda x: re.sub(r'[^a-z0-9]', '', str(x).lower()))
         df = df.drop_duplicates('MATCH_KEY', keep='first').drop(columns=['MATCH_KEY'])
-        df.to_sql('merchants', db_engine, if_exists='replace', index=False)
+        df.to_sql('merchants', db_engine, if_exists='replace', index=False) # Vi genbruger tabelnavn for nemhed
         return True
     return False
 
-# Initialiser data
-if 'df' not in st.session_state:
-    try: st.session_state.df = pd.read_sql("SELECT * FROM merchants", db_engine)
-    except: st.session_state.df = pd.DataFrame(columns=MASTER_COLS)
+# --- INITIALISERING ---
+if 'df_leads' not in st.session_state:
+    if db_engine:
+        try: 
+            df = pd.read_sql("SELECT * FROM merchants", db_engine)
+            st.session_state.df_leads = force_clean_leads(df)
+        except: st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS)
+    else: st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS)
 
-st.session_state.df = robust_repair(st.session_state.df)
 opts = load_options()
 
-# --- 6. KLIENT KORT POP-UP ---
-@st.dialog("📝 Klient Detaljer & CRM", width="large")
-def client_popup(idx):
-    row = st.session_state.df.loc[idx].to_dict()
-    st.title(f"🏢 {row.get('Virksomhed') or row.get('Programnavn') or 'Ukendt'}")
+# --- 6. DET NYE KLIENT KORT (POP-UP) ---
+@st.dialog("🎯 Lead Detaljer & Administration", width="large")
+def lead_popup(idx):
+    row = st.session_state.df_leads.loc[idx].to_dict()
+    st.title(f"🏢 {row.get('Company Name', 'Nyt Lead')}")
     st.divider()
     
-    t1, t2 = st.tabs(["📊 Stamdata & Pipeline", "📓 Noter & Vedhæftninger"])
+    t1, t2, t3, t4 = st.tabs(["📌 Basis & Kontakt", "🏢 Forretning", "📊 CRM & Salg", "🖼️ Medier"])
     upd = {}
 
     with t1:
-        c1, c2, c3 = st.columns(3)
+        c1, c2 = st.columns(2)
         with c1:
-            st.markdown("##### 📞 Kontakt")
-            for f in ['Fornavn', 'Efternavn', 'Mail', 'Tlf', 'Website']:
-                upd[f] = st.text_input(f, value=row.get(f, ''))
+            upd['Company Name'] = st.text_input("Virksomhedsnavn (Legal)", value=row.get('Company Name'))
+            upd['CIF Number VAT'] = st.text_input("CIF / VAT Nummer", value=row.get('CIF Number VAT'))
+            upd['Email'] = st.text_input("E-mail", value=row.get('Email'))
+            upd['Phone number'] = st.text_input("Telefon", value=row.get('Phone number'))
         with c2:
-            st.markdown("##### ⚙️ Pipeline")
-            d_val = row.get('Dialog', 'Ikke kontakte')
-            upd['Dialog'] = st.selectbox("Dialog Status", opts['dialogs'], index=opts['dialogs'].index(d_val) if d_val in opts['dialogs'] else 0)
-            upd['Ticketnr'] = st.text_input("Ticket #", value=row.get('Ticketnr', ''))
-            
-            # HER ER FIXET: Alle datoer kører gennem den nye 'get_safe_date_for_picker'
-            upd['Opflg. dato'] = st.date_input("Næste opfølgning", value=get_safe_date_for_picker(row.get('Opflg. dato'))).strftime('%d/%m/%Y')
-            upd['Kontakt dato'] = st.date_input("Kontakt dato", value=get_safe_date_for_picker(row.get('Kontakt dato'))).strftime('%d/%m/%Y')
-        with c3:
-            st.markdown("##### 📈 Info")
-            a_val = row.get('Aff. status', 'Ikke ansøgt')
-            upd['Aff. status'] = st.selectbox("Aff. status", opts['aff_status'], index=opts['aff_status'].index(a_val) if a_val in opts['aff_status'] else 0)
-            upd['Kategori'] = st.text_input("Hovedkategori", value=row.get('Kategori', ''))
-            upd['MID'] = st.text_input("MID", value=row.get('MID', ''))
-            upd['Produkter'] = st.text_input("Produkter", value=row.get('Produkter', ''))
-            upd['EPC'] = st.text_input("EPC", value=row.get('EPC', ''))
-
-        st.divider()
-        st.markdown("##### 📊 Tekniske Systemdata")
-        ca, cb, cc = st.columns(3)
-        with ca:
-            # FIX: Også Date Added har fået kalender og sikkerhedstjek
-            upd['Date Added'] = st.date_input("Dato tilføjet", value=get_safe_date_for_picker(row.get('Date Added'))).strftime('%d/%m/%Y')
-            upd['Programnavn'] = st.text_input("Programnavn (Original)", value=row.get('Programnavn', ''))
-        with cb:
-            upd['Segment'] = st.text_input("Segment", value=row.get('Segment', ''))
-            upd['Salgs % (sats)'] = st.text_input("Salgs %", value=row.get('Salgs % (sats)', ''))
-            upd['Lead/Fast (sats)'] = st.text_input("Lead/Fast", value=row.get('Lead/Fast (sats)', ''))
-        with cc:
-            upd['Trafik'] = st.text_input("Trafik", value=row.get('Trafik', ''))
-            upd['Network'] = st.selectbox("Netværk", opts['networks'], index=opts['networks'].index(row.get('Network')) if row.get('Network') in opts['networks'] else 0)
-            upd['Land'] = st.selectbox("Land Ikon", opts['lands'], index=opts['lands'].index(row.get('Land')) if row.get('Land') in opts['lands'] else 0)
-            upd['Feed?'] = st.text_input("Feed?", value=row.get('Feed?', ''))
+            upd['Website'] = st.text_input("Website", value=row.get('Website'))
+            upd['Address'] = st.text_input("Adresse", value=row.get('Address'))
+            upd['Town'] = st.text_input("By", value=row.get('Town'))
+            upd['Postal Code'] = st.text_input("Postnummer", value=row.get('Postal Code'))
 
     with t2:
-        upd['Noter'] = st.text_area("Skriv logbog her...", value=row.get('Noter', ''), height=300)
-        st.divider()
-        if row.get('Fil_Navn'):
-            st.info(f"📂 Aktuel fil: {row['Fil_Navn']}")
-            if row.get('Fil_Data'):
-                b64 = row['Fil_Data']
-                href = f'<a href="data:application/octet-stream;base64,{b64}" download="{row["Fil_Navn"]}">👉 Download fil</a>'
-                st.markdown(href, unsafe_allow_html=True)
-        up = st.file_uploader("Upload ny fil", key=f"f_{idx}")
-        if up:
-            upd['Fil_Navn'] = up.name
-            upd['Fil_Data'] = base64.b64encode(up.read()).decode()
+        c1, c2 = st.columns(2)
+        with c1:
+            # Multi-select til Kategorier
+            current_cats = [x.strip() for x in str(row.get('Business Category')).split(',')] if row.get('Business Category') else []
+            upd['Business Category'] = ", ".join(st.multiselect("Kategorier", opts['categories'], default=[c for c in current_cats if c in opts['categories']]))
+            
+            upd['Area'] = st.selectbox("Område", opts['areas'], index=opts['areas'].index(row.get('Area')) if row.get('Area') in opts['areas'] else 0)
+            upd['Work time'] = st.text_input("Åbningstider", value=row.get('Work time'))
+        with c2:
+            current_langs = [x.strip() for x in str(row.get('Languages')).split(',')] if row.get('Languages') else []
+            upd['Languages'] = ", ".join(st.multiselect("Sprog", opts['languages'], default=[l for l in current_langs if l in opts['languages']]))
+            upd['Exact Location'] = st.text_input("Kort lokation (URL/GPS)", value=row.get('Exact Location'))
+        
+        upd['Business Description'] = st.text_area("Kort beskrivelse", value=row.get('Business Description'))
+        upd['Description'] = st.text_area("Lang beskrivelse (til annoncering)", value=row.get('Description'), height=150)
 
-    if st.button("💾 GEM KLIENT DATA", type="primary", use_container_width=True):
-        for k,v in upd.items(): st.session_state.df.at[idx, k] = v
-        if save_to_db(st.session_state.df): st.rerun()
+    with t3:
+        c1, c2 = st.columns(2)
+        with c1:
+            upd['Status on lead'] = st.selectbox("Status", opts['lead_status'], index=opts['lead_status'].index(row.get('Status on lead')) if row.get('Status on lead') in opts['lead_status'] else 0)
+            upd['Leadtype'] = st.selectbox("Lead type", opts['lead_types'], index=opts['lead_types'].index(row.get('Leadtype')) if row.get('Leadtype') in opts['lead_types'] else 0)
+            upd['Agent'] = st.selectbox("Ansvarlig Agent", opts['agents'], index=opts['agents'].index(row.get('Agent')) if row.get('Agent') in opts['agents'] else 0)
+        with c2:
+            upd['Membership'] = st.selectbox("Medlemskab", opts['memberships'], index=opts['memberships'].index(row.get('Membership')) if row.get('Membership') in opts['memberships'] else 0)
+            upd['Date created'] = st.date_input("Oprettet dato", value=get_safe_date(row.get('Date created'))).strftime('%d/%m/%Y')
+            upd['Date for follow up'] = st.date_input("Opfølgningsdato", value=get_safe_date(row.get('Date for follow up'))).strftime('%d/%m/%Y')
+        
+        upd['Noter'] = st.text_area("Interne CRM Noter", value=row.get('Noter'), height=150)
 
-# --- 7. UI SIDEBAR ---
+    with t4:
+        st.subheader("Logo & Galleri")
+        st.file_uploader("Upload Logo", key=f"logo_{idx}")
+        st.file_uploader("Upload Galleri Billeder", accept_multiple_files=True, key=f"gal_{idx}")
+
+    if st.button("💾 GEM LEAD DATA", type="primary", use_container_width=True):
+        for k,v in upd.items(): st.session_state.df_leads.at[idx, k] = v
+        if save_leads_db(st.session_state.df_leads): st.rerun()
+
+# --- 7. SIDEBAR (NYT: MANUEL OPRETTELSE) ---
 with st.sidebar:
-    st.header("⚙️ CRM Kontrol")
-    with st.expander("📊 Sortering"):
-        s_col = st.selectbox("Sortér efter:", ["Date Added", "Produkter", "EPC", "Virksomhed", "Dialog"])
-        s_asc = st.radio("Orden:", ["Nyeste/Højeste", "Ældste/Laveste"])
-        if st.button("Udfør Sortering"):
-            st.session_state.df = st.session_state.df.sort_values(s_col, ascending=(s_asc=="Ældste/Laveste"))
-            save_to_db(st.session_state.df); st.rerun()
-
-    with st.expander("🛠️ Administrer Dropdowns"):
-        t_sel = st.selectbox("Type:", ["aff_status", "networks", "lands", "dialogs"])
-        v_new = st.text_input("Nyt valg:")
-        if st.button("Tilføj nu") and v_new: add_dropdown_option(t_sel, v_new); st.rerun()
-
-    st.divider()
-    st.download_button("📥 Master Export", st.session_state.df.to_csv(index=False), "master.csv", use_container_width=True)
+    st.title("⚙️ CRM Kontrol")
     
+    if st.button("➕ OPRET NYT LEAD MANUELT", use_container_width=True, type="primary"):
+        new_row = pd.DataFrame([{c: "" for c in MASTER_COLS}])
+        st.session_state.df_leads = pd.concat([st.session_state.df_leads, new_row], ignore_index=True)
+        # Gem med det samme så vi får et index
+        save_leads_db(st.session_state.df_leads)
+        st.rerun()
+
     st.divider()
-    kat_up = st.text_input("Kategori ved upload:", "Bolig, Have og Interiør")
-    f_up = st.file_uploader("Flet ny fil")
+    st.header("📥 Import Excel/CSV")
+    f_up = st.file_uploader("Vælg fil")
     if f_up and st.button("Flet & Gem"):
         nd = pd.read_csv(f_up) if f_up.name.endswith('csv') else pd.read_excel(f_up)
-        nd = nd.rename(columns={'Merchant': 'Virksomhed', 'Product Count': 'Produkter', 'EPC (nøgletal)': 'EPC', 'Aff. Status': 'Aff. status'})
-        nd['Kategori'] = kat_up
-        st.session_state.df = robust_repair(pd.concat([st.session_state.df, nd], ignore_index=True))
-        save_to_db(st.session_state.df); st.rerun()
+        st.session_state.df_leads = force_clean_leads(pd.concat([st.session_state.df_leads, nd], ignore_index=True))
+        save_leads_db(st.session_state.df_leads); st.rerun()
 
-    if st.button("🚪 Lås CRM"):
-        st.session_state.auth = False; st.rerun()
+    st.divider()
+    if st.button("🚨 Nulstil Database"):
+        if db_engine:
+            with db_engine.connect() as conn:
+                conn.execute(text("DROP TABLE IF EXISTS merchants"))
+                conn.commit()
+        st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS); st.rerun()
 
 # --- 8. HOVEDVISNING ---
-st.title("💼 CRM Master Workspace")
-search = st.text_input("🔍 Søg i CRM...", "")
-df_v = st.session_state.df.copy()
+st.title("💼 Lead Database")
+search = st.text_input("🔍 Hurtig søgning i leads...", "")
+
+df_v = st.session_state.df_leads.copy()
 if search:
     df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
 
 sel = st.dataframe(
-    df_v[[c for c in df_v.columns if c != 'Fil_Data']], 
-    use_container_width=True, selection_mode="single-row", on_select="rerun", height=600,
+    df_v, 
+    use_container_width=True, 
+    selection_mode="single-row", 
+    on_select="rerun", 
+    height=600,
     column_config={"Website": st.column_config.LinkColumn("Website")}
 )
 
 if sel.selection.rows:
     real_idx = df_v.index[sel.selection.rows[0]]
-    client_popup(real_idx)
+    lead_popup(real_idx)
