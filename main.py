@@ -35,7 +35,7 @@ def get_base64_image(file_path):
             return base64.b64encode(f.read()).decode()
     return None
 
-# --- 3. MASTER STRUKTUR (SAMTLIGE 35 FELTER) ---
+# --- 3. MASTER STRUKTUR (ALLE 35 FELTER) ---
 MASTER_COLS = [
     'Date created', 'Company Name', 'Brancher', 'Underbrancher', 'Region', 'Area', 'Town', 
     'Postal Code', 'Address', 'Exact Location', 'Kontaktperson', 'Titel', 'Email', 
@@ -105,15 +105,15 @@ if 'df_leads' not in st.session_state:
     try:
         df = pd.read_sql("SELECT * FROM merchants_playground", db_engine)
         st.session_state.df_leads = force_clean(df)
-    except: st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS)
+    except:
+        st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS)
 opts = load_options()
 
-# --- 6. DET KOMPLETTE KLIENT KORT ---
+# --- 6. KLIENT KORT POPUP ---
 @st.dialog("🎯 Lead Administration & CRM Board", width="large")
 def lead_popup(idx):
     row = st.session_state.df_leads.loc[idx].to_dict()
     
-    # Header med Logo
     c_h1, c_h2 = st.columns([0.8, 0.2])
     with c_h1: st.title(f"🏢 {row.get('Company Name') or 'Nyt Lead'}")
     with c_h2: 
@@ -124,12 +124,19 @@ def lead_popup(idx):
     upd = {}
 
     with t1:
+        # VIRKSOMHED OG CIF ØVERST SOM ØNSKET
+        st.markdown("##### 🏢 Virksomheds Identifikation")
+        c_top1, c_top2 = st.columns(2)
+        upd['Company Name'] = c_top1.text_input("Virksomhedsnavn (Legal Name)", value=row.get('Company Name'))
+        upd['CIF Number VAT'] = c_top2.text_input("CIF / VAT Nummer", value=row.get('CIF Number VAT'))
+        
+        st.markdown("---")
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("##### 👤 Personlig kontakt")
             upd['Kontaktperson'] = st.text_input("Navn", value=row.get('Kontaktperson'))
             upd['Titel'] = st.selectbox("Titel", opts['titles'], index=opts['titles'].index(row.get('Titel')) if row.get('Titel') in opts['titles'] else 0)
-            upd['Email'] = st.text_input("E-mail", value=row.get('Email'))
+            upd['Email'] = st.text_input("Hoved E-mail", value=row.get('Email'))
             upd['Phone number'] = st.text_input("Kontor Tlf", value=row.get('Phone number'))
             upd['Mobilnr'] = st.text_input("Mobil (Vigtig)", value=row.get('Mobilnr'))
         with c2:
@@ -202,7 +209,7 @@ def lead_popup(idx):
         for k,v in upd.items(): st.session_state.df_leads.at[idx, k] = v
         if save_db(st.session_state.df_leads): st.rerun()
 
-# --- 7. SIDEBAR (LOGO & FILTER) ---
+# --- 7. SIDEBAR ---
 with st.sidebar:
     l_mgm = get_base64_image("applogo.png")
     if l_mgm: st.markdown(f'<div style="text-align:center"><img src="data:image/png;base64,{l_mgm}" width="180"></div>', unsafe_allow_html=True)
@@ -212,7 +219,6 @@ with st.sidebar:
     f_reg = st.multiselect("Region:", opts['regions'])
     f_town = st.multiselect("By:", sorted([t for t in st.session_state.df_leads['Town'].unique() if t]))
     f_st = st.multiselect("Status:", opts['status'])
-    f_ag = st.multiselect("Agent:", opts['agents'])
 
     with st.expander("🛠️ Administrer Dropdowns"):
         t_sel = st.selectbox("Vælg:", ["brancher", "underbrancher", "regions", "areas", "titles", "agents", "lead_types", "memberships", "advertising", "status", "sprog"])
@@ -227,27 +233,20 @@ with st.sidebar:
         save_db(st.session_state.df_leads); st.rerun()
 
     st.download_button("📥 Master Export", st.session_state.df_leads.to_csv(index=False), "leads_master.csv", use_container_width=True)
-    if st.button("🚨 Nulstil DB"):
-        if db_engine:
-            with db_engine.connect() as conn: conn.execute(text("DROP TABLE IF EXISTS merchants_playground")); conn.commit()
-        st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS); st.rerun()
 
 # --- 8. DASHBOARD ---
-st.title("💼 Business CRM Pro")
+st.title("💼 Business CRM Master")
 df_v = st.session_state.df_leads.copy()
-
 if f_br: df_v = df_v[df_v['Brancher'].apply(lambda x: any(b in x for b in f_br))]
 if f_reg: df_v = df_v[df_v['Region'].isin(f_reg)]
 if f_town: df_v = df_v[df_v['Town'].isin(f_town)]
 if f_st: df_v = df_v[df_v['Status on lead'].isin(f_st)]
-if f_ag: df_v = df_v[df_v['Agent'].isin(f_ag)]
 
-search = st.text_input("🔍 Hurtig søg i alt data...")
+search = st.text_input("🔍 Søg i alt data...")
 if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
 
 st.write(f"Viste leads: **{len(df_v)}**")
 sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="single-row", on_select="rerun", height=600)
-
 if sel.selection.rows:
     real_idx = df_v.index[sel.selection.rows[0]]
     lead_popup(real_idx)
