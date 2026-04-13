@@ -12,7 +12,7 @@ import json
 # --- 1. KONFIGURATION ---
 st.set_page_config(page_title="Business Master CRM AI", layout="wide", page_icon="🎯")
 
-# --- 2. DATABASE MOTOR (HÆRDET MOD SCHEMA-FEJL) ---
+# --- 2. DATABASE MOTOR (MED AUTOMATISK REPARATION) ---
 @st.cache_resource
 def get_engine():
     db_url = os.getenv("DATABASE_URL")
@@ -20,14 +20,21 @@ def get_engine():
         if db_url.startswith("postgres://"):
             db_url = db_url.replace("postgres://", "postgresql://", 1)
         try:
-            engine = create_engine(db_url, pool_size=10, max_overflow=20, pool_pre_ping=True)
-            # Reparer og initialiser tabeller med korrekte kolonner
+            engine = create_engine(db_url, pool_pre_ping=True)
+            # DATABASE REPARATION LOGIK
             with engine.begin() as conn:
+                # 1. Sikr leads tabel
                 conn.execute(text("CREATE TABLE IF NOT EXISTS merchants_playground (id SERIAL PRIMARY KEY, data JSONB)"))
+                # 2. Sikr bruger tabel
                 conn.execute(text("CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, role TEXT)"))
                 
-                # FIX: Sikrer at settings-tabellen har de rigtige kolonner
-                conn.execute(text("CREATE TABLE IF NOT EXISTS pg_settings (id SERIAL PRIMARY KEY, type TEXT, value TEXT)"))
+                # 3. FIX PG_SETTINGS: Tjek om den er ødelagt
+                try:
+                    conn.execute(text("SELECT type FROM pg_settings LIMIT 1"))
+                except:
+                    st.warning("Reparerer indstillingstabel...")
+                    conn.execute(text("DROP TABLE IF EXISTS pg_settings"))
+                    conn.execute(text("CREATE TABLE pg_settings (id SERIAL PRIMARY KEY, type TEXT, value TEXT)"))
                 
                 # Opret admin hvis tom
                 res = conn.execute(text("SELECT COUNT(*) FROM users")).fetchone()
@@ -36,8 +43,7 @@ def get_engine():
                     conn.execute(text("INSERT INTO users VALUES (:u, :p, 'admin')"), {"u": u, "p": p})
             return engine
         except Exception as e:
-            st.error(f"Kritisk Databasefejl: {e}")
-            return None
+            st.error(f"Databasefejl: {e}")
     return None
 
 db_engine = get_engine()
@@ -45,13 +51,12 @@ openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # SIKKER DATABASE-SKRIVNING
 def db_execute(query, params=None):
-    if not db_engine: return False
     try:
         with db_engine.begin() as conn:
             conn.execute(text(query), params or {})
         return True
     except Exception as e:
-        st.error(f"Fejl ved gem: {e}")
+        st.error(f"Kunne ikke gemme: {e}")
         return False
 
 # --- 3. AI SCANNER (GPT-4o) ---
@@ -62,7 +67,7 @@ def analyze_image_with_ai(image_bytes):
         response = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": [
-                {"type": "text", "text": "Extract business card info into JSON. Keys: Company Name, CIF Number VAT, Kontaktperson, Email, Phone number, Website, Town, Address."},
+                {"type": "text", "text": "Extract info into JSON: Company Name, CIF Number VAT, Kontaktperson, Email, Phone number, Website, Town, Address."},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
             ]}],
             response_format={ "type": "json_object" }
@@ -70,7 +75,7 @@ def analyze_image_with_ai(image_bytes):
         return json.loads(response.choices[0].message.content)
     except: return {"Company Name": "AI Fejl"}
 
-# --- 4. LOGIN SYSTEM ---
+# --- 4. LOGIN ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
 
 def check_login():
@@ -86,7 +91,7 @@ def check_login():
             else: st.error("❌ Login fejlede")
 
 if not st.session_state.authenticated:
-    st.title("💼 Business CRM Login")
+    st.title("💼 CRM Master Login")
     _, col, _ = st.columns([1, 1, 1])
     with col:
         st.text_input("Brugernavn", key="l_u")
@@ -108,16 +113,16 @@ DISPLAY_COLS = ['Date created', 'Company Name', 'Brancher', 'Town', 'Status on l
 def load_options():
     defaults = {
         "agents": ["Brian", "Olga"],
-        "brancher": ["Ejendomsmægler", "Restaurant", "Håndværker", "Advokat", "Butik", "Service", "Turisme", "Andet"],
-        "underbrancher": ["Boligsalg", "Udlejning", "Tapas", "Take-away", "VVS", "El", "Tømrer", "Murer", "Bogføring", "Rengøring"],
-        "regions": ["Andalucía", "Cataluña", "Madrid", "Valenciana", "Galicia", "Castilla y León", "País Vasco", "Canarias", "Murcia", "Aragón", "Extremadura", "Baleares", "Asturias", "Navarra", "Cantabria", "La Rioja"],
-        "areas": ["Costa del Sol", "Costa Blanca", "Costa Brava", "Costa de la Luz", "Mallorca", "Ibiza", "Madrid City", "Barcelona City"],
-        "status": ["Ny", "Dialog", "Vundet", "Tabt", "Opfølgning", "Pause"],
+        "brancher": ["Ejendomsmægler", "Restaurant", "Håndværker", "Advokat", "Butik", "Turisme", "Andet"],
+        "underbrancher": ["Boligsalg", "Udlejning", "Tapas", "Take-away", "VVS", "El", "Tømrer", "Murer", "Rengøring"],
+        "status": ["Ny", "Dialog", "Vundet", "Tabt", "Opfølgning"],
         "sprog": ["Dansk", "Engelsk", "Spansk", "Svensk", "Norsk", "Tysk"],
-        "titles": ["CEO", "Ejer", "Manager", "Marketingchef"],
-        "memberships": ["Ingen", "Gratis", "Basis", "Premium", "VIP"],
-        "advertising": ["Ingen", "Standard Profil", "Premium Eksponering", "Banner kampagne"],
-        "lead_types": ["Inbound", "Outbound", "AI Scan", "Reference"]
+        "regions": ["Andalucía", "Cataluña", "Madrid", "Valenciana", "Galicia", "Canarias", "Baleares"],
+        "areas": ["Costa del Sol", "Costa Blanca", "Costa Brava", "Mallorca", "Ibiza"],
+        "titles": ["CEO", "Ejer", "Manager"],
+        "memberships": ["Ingen", "Basis", "Premium", "VIP"],
+        "advertising": ["Ingen", "Standard", "Premium"],
+        "lead_types": ["Inbound", "Outbound", "AI Scan"]
     }
     if db_engine:
         try:
@@ -128,7 +133,7 @@ def load_options():
         except: pass
     return defaults
 
-# --- 6. RENSE-MOTOR ---
+# --- 6. RENSE MOTOR ---
 def force_clean(df):
     if df.empty: return pd.DataFrame(columns=MASTER_COLS)
     df = df.loc[:, ~df.columns.duplicated()].copy()
@@ -151,8 +156,8 @@ if 'df_leads' not in st.session_state:
     except: st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS)
 opts = load_options()
 
-# --- 7. KLIENT KORT POPUP ---
-@st.dialog("🎯 Lead Detaljer & CRM", width="large")
+# --- 7. KLIENT KORT ---
+@st.dialog("🎯 Lead Administration", width="large")
 def lead_popup(idx):
     row = st.session_state.df_leads.loc[idx].to_dict()
     c1, c2 = st.columns([0.8, 0.2])
@@ -199,38 +204,30 @@ def lead_popup(idx):
                 upd[f] = st.date_input(f, value=d_v, key=f"{f}_{idx}").strftime('%d/%m/%Y')
     with t4:
         upd['Business Description'] = st.text_area("Kort Pitch", value=row.get('Business Description'), height=100, key=f"bd_{idx}")
-        upd['Description'] = st.text_area("Lang Annoncetekst", value=row.get('Description'), height=200, key=f"de_{idx}")
+        upd['Description'] = st.text_area("Annoncetekst", value=row.get('Description'), height=200, key=f"de_{idx}")
         upd['Tracking_URL'] = st.text_input("QR Tracking URL", value=row.get('Tracking_URL'), key=f"tr_{idx}")
     with t5:
         upd['Noter'] = st.text_area("CRM Logbog", value=row.get('Noter'), height=200, key=f"no_{idx}")
         c1, c2 = st.columns(2)
-        with c1:
-            l_up = st.file_uploader("Logo", type=['png','jpg'], key=f"lu_{idx}")
-            if l_up: upd['Logo_Data'] = base64.b64encode(l_up.read()).decode()
-        with c2:
-            if row.get('Fil_Data'): st.markdown(f'<a href="data:application/octet-stream;base64,{row["Fil_Data"]}" download="{row["Fil_Navn"]}">Hent Dok.</a>', unsafe_allow_html=True)
-            f_up = st.file_uploader("Vedhæft Fil", key=f"fu_{idx}")
-            if f_up: upd['Fil_Navn'], upd['Fil_Data'] = f_up.name, base64.b64encode(f_up.read()).decode()
-        st.file_uploader("Galleri (Flere filer)", accept_multiple_files=True, key=f"ga_{idx}")
+        if l_up := st.file_uploader("Logo", type=['png','jpg'], key=f"lu_{idx}"):
+            upd['Logo_Data'] = base64.b64encode(l_up.read()).decode()
+        if f_up := st.file_uploader("Fil", key=f"fu_{idx}"):
+            upd['Fil_Navn'], upd['Fil_Data'] = f_up.name, base64.b64encode(f_up.read()).decode()
+        st.file_uploader("Galleri", accept_multiple_files=True, key=f"ga_{idx}")
 
-    c_s, c_d = st.columns([4, 1])
-    if c_s.button("💾 GEM ALT", type="primary", use_container_width=True):
+    if st.button("💾 GEM ALT", type="primary", use_container_width=True):
         for k,v in upd.items(): st.session_state.df_leads.at[idx, k] = v
         if save_db(st.session_state.df_leads): st.rerun()
-    if st.session_state.user_role == "admin" and c_d.button("🗑️ SLET", type="secondary", use_container_width=True):
-        st.session_state.df_leads = st.session_state.df_leads.drop(idx)
-        save_db(st.session_state.df_leads); st.rerun()
 
 # --- 8. SIDEBAR ---
 with st.sidebar:
     st.header(f"👤 {st.session_state.username}")
-    with st.expander("📸 AI Card Scanner"):
-        cam = st.camera_input("Tag billede")
-        if cam:
-            with st.spinner("AI analyserer..."):
-                ai_data = analyze_image_with_ai(cam.read())
+    with st.expander("📸 AI Scanner"):
+        if cam := st.camera_input("Scan visitkort"):
+            with st.spinner("AI tænker..."):
+                ai = analyze_image_with_ai(cam.read())
                 nr = {c: "" for c in MASTER_COLS}
-                nr.update(ai_data); nr['Date created'] = date.today().strftime('%d/%m/%Y'); nr['Leadtype'] = "AI Scan"
+                nr.update(ai); nr['Date created'] = date.today().strftime('%d/%m/%Y')
                 st.session_state.df_leads = pd.concat([st.session_state.df_leads, pd.DataFrame([nr])], ignore_index=True)
                 save_db(st.session_state.df_leads); st.rerun()
 
@@ -238,44 +235,39 @@ with st.sidebar:
         st.divider()
         with st.expander("🛠️ Dropdown Administration"):
             for label, key in [("Agent", "agents"), ("Branche", "brancher"), ("Underbranche", "underbrancher"), ("Region", "regions"), ("Område", "areas"), ("Status", "status"), ("Sprog", "sprog"), ("Titel", "titles"), ("Medlemskab", "memberships"), ("Annonceprofil", "advertising"), ("Lead Kilde", "lead_types")]:
-                st.markdown(f"**{label}**")
                 v_new = st.text_input(f"Ny {label}:", key=f"a_{key}")
-                if st.button(f"Tilføj til {label}", key=f"b_{key}"):
+                if st.button(f"Tilføj {label}", key=f"b_{key}"):
                     if db_execute("INSERT INTO pg_settings (type, value) VALUES (:t, :v)", {"t": key, "v": v_new}):
-                        st.success("Gemt!"); st.rerun()
+                        st.success("Tilføjet!"); st.rerun()
             
-            st.divider()
             if st.button("🚨 NULSTIL DB", type="secondary"):
-                if db_engine:
-                    with db_engine.begin() as conn: conn.execute(text("DROP TABLE IF EXISTS merchants_playground"))
+                with db_engine.begin() as conn: conn.execute(text("DROP TABLE IF EXISTS merchants_playground"))
                 st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS); st.rerun()
 
     st.divider()
-    st.subheader("🎯 Kampagne Filtre")
+    st.subheader("🎯 Filtre")
     f_ag = st.multiselect("Agent:", opts['agents'])
     f_st = st.multiselect("Status:", opts['status'])
     f_br = st.multiselect("Branche:", opts['brancher'])
     f_re = st.multiselect("Region:", opts['regions'])
     f_town = st.multiselect("By:", sorted([t for t in st.session_state.df_leads['Town'].unique() if t]))
 
-    st.divider()
     if st.button("➕ OPRET MANUELT", type="primary", use_container_width=True):
         nr = {c: "" for c in MASTER_COLS}; nr['Date created'] = date.today().strftime('%d/%m/%Y'); nr['Agent'] = st.session_state.username
         st.session_state.df_leads = pd.concat([st.session_state.df_leads, pd.DataFrame([nr])], ignore_index=True)
         save_db(st.session_state.df_leads); st.rerun()
-    st.download_button("📥 Master Export", st.session_state.df_leads.to_csv(index=False), "master.csv", use_container_width=True)
+    st.download_button("📥 Eksport", st.session_state.df_leads.to_csv(index=False), "master.csv", use_container_width=True)
     if st.button("🚪 Log ud"): st.session_state.authenticated = False; st.rerun()
 
 # --- 9. DASHBOARD ---
-st.title("💼 CRM Workspace")
+st.title("💼 Business Master Master AI")
 df_v = st.session_state.df_leads.copy()
 if f_ag: df_v = df_v[df_v['Agent'].isin(f_ag)]
 if f_st: df_v = df_v[df_v['Status on lead'].isin(f_st)]
 if f_re: df_v = df_v[df_v['Region'].isin(f_re)]
 if f_br: df_v = df_v[df_v['Brancher'].apply(lambda x: any(b in x for b in f_br))]
 if f_town: df_v = df_v[df_v['Town'].isin(f_town)]
-
-search = st.text_input("🔍 Søg i alt data...")
+search = st.text_input("🔍 Søg...")
 if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
 
 sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="single-row", on_select="rerun", height=600)
