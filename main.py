@@ -10,41 +10,26 @@ from openai import OpenAI
 import json
 
 # --- 1. KONFIGURATION ---
-st.set_page_config(page_title="Business Master CRM AI", layout="wide", page_icon="🎯")
+st.set_page_config(page_title="Business CRM Pro AI", layout="wide", page_icon="🎯")
 
-# --- 2. DATABASE MOTOR (SKUDSIKKER INITIALISERING) ---
+# --- 2. DATABASE MOTOR (FORCE NEW CONFIG TABLE) ---
 @st.cache_resource
 def get_engine():
     db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        return None
+    if not db_url: return None
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
     
     try:
         engine = create_engine(db_url, pool_pre_ping=True)
-        
-        # SIKKER INITIALISERING AF TABELLER
         with engine.begin() as conn:
-            # Opret tabeller hvis de ikke findes
+            # 1. Leads tabel (Vi rører ikke dine data)
             conn.execute(text("CREATE TABLE IF NOT EXISTS merchants_playground (id SERIAL PRIMARY KEY, data JSONB)"))
+            # 2. Bruger tabel
             conn.execute(text("CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, role TEXT)"))
+            # 3. NY INDSTILLINGS TABEL (Omdøbt for at undgå din fejl)
+            conn.execute(text("CREATE TABLE IF NOT EXISTS crm_configs (id SERIAL PRIMARY KEY, type TEXT, value TEXT)"))
             
-            # Tjek specifikt om pg_settings har de rigtige kolonner uden at bryde transaktionen
-            check_table = conn.execute(text(
-                "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'pg_settings')"
-            )).fetchone()[0]
-            
-            if check_table:
-                check_col = conn.execute(text(
-                    "SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_name='pg_settings' AND column_name='type')"
-                )).fetchone()[0]
-                if not check_col:
-                    conn.execute(text("DROP TABLE pg_settings"))
-                    conn.execute(text("CREATE TABLE pg_settings (id SERIAL PRIMARY KEY, type TEXT, value TEXT)"))
-            else:
-                conn.execute(text("CREATE TABLE pg_settings (id SERIAL PRIMARY KEY, type TEXT, value TEXT)"))
-
             # Opret admin hvis tom
             res = conn.execute(text("SELECT COUNT(*) FROM users")).fetchone()
             if res[0] == 0:
@@ -52,21 +37,19 @@ def get_engine():
                 conn.execute(text("INSERT INTO users VALUES (:u, :p, 'admin')"), {"u": u, "p": p})
         return engine
     except Exception as e:
-        st.error(f"Database start-fejl: {e}")
+        st.error(f"Kritisk fejl: {e}")
         return None
 
 db_engine = get_engine()
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# SIKKER DATABASE-HANDLING (Hver handling er sin egen transaktion)
 def db_execute(query, params=None):
-    if not db_engine: return False
     try:
         with db_engine.begin() as conn:
             conn.execute(text(query), params or {})
         return True
     except Exception as e:
-        st.error(f"Kunne ikke gemme: {e}")
+        st.error(f"Databasefejl: {e}")
         return False
 
 # --- 3. AI SCANNER (GPT-4o) ---
@@ -83,7 +66,7 @@ def analyze_image_with_ai(image_bytes):
             response_format={ "type": "json_object" }
         )
         return json.loads(response.choices[0].message.content)
-    except: return {"Company Name": "AI Scanning Fejl"}
+    except: return {"Company Name": "AI Fejl"}
 
 # --- 4. LOGIN ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
@@ -98,10 +81,10 @@ def check_login():
             res = conn.execute(text("SELECT password, role FROM users WHERE username = :u"), {"u": u}).fetchone()
             if res and res[0] == p:
                 st.session_state.authenticated, st.session_state.user_role, st.session_state.username = True, res[1], u
-            else: st.error("❌ Login fejlede")
+            else: st.error("❌ Ugyldig login")
 
 if not st.session_state.authenticated:
-    st.title("💼 CRM Master Login")
+    st.title("💼 CRM Login")
     _, col, _ = st.columns([1, 1, 1])
     with col:
         st.text_input("Brugernavn", key="l_u")
@@ -109,7 +92,7 @@ if not st.session_state.authenticated:
         st.button("LOG IND", type="primary", use_container_width=True, on_click=check_login)
     st.stop()
 
-# --- 5. MASTER DATA DEFINITIONER ---
+# --- 5. MASTER DATA & OPTIONER ---
 MASTER_COLS = [
     'Date created', 'Company Name', 'CIF Number VAT', 'Brancher', 'Underbrancher', 'Region', 'Area', 'Town', 
     'Postal Code', 'Address', 'Exact Location', 'Kontaktperson', 'Titel', 'Email', 
@@ -136,14 +119,15 @@ def load_options():
     }
     if db_engine:
         try:
-            df_opt = pd.read_sql("SELECT * FROM pg_settings", db_engine)
+            # Vi læser fra den NYE tabel crm_configs
+            df_opt = pd.read_sql("SELECT * FROM crm_configs", db_engine)
             for key in defaults.keys():
                 stored = df_opt[df_opt['type'] == key]['value'].tolist()
                 if stored: defaults[key] = sorted(list(set(defaults[key] + stored)))
         except: pass
     return defaults
 
-# --- 6. RENSE-MOTOR ---
+# --- 6. RENSE- OG GEMME-MOTOR ---
 def force_clean(df):
     if df.empty: return pd.DataFrame(columns=MASTER_COLS)
     df = df.loc[:, ~df.columns.duplicated()].copy()
@@ -166,7 +150,7 @@ if 'df_leads' not in st.session_state:
     except: st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS)
 opts = load_options()
 
-# --- 7. KLIENT KORT ---
+# --- 7. KLIENT KORT POPUP ---
 @st.dialog("🎯 Lead Administration", width="large")
 def lead_popup(idx):
     row = st.session_state.df_leads.loc[idx].to_dict()
@@ -214,8 +198,8 @@ def lead_popup(idx):
                 upd[f] = st.date_input(f, value=d_v, key=f"{f}_{idx}").strftime('%d/%m/%Y')
     with t4:
         upd['Business Description'] = st.text_area("Kort Pitch", value=row.get('Business Description'), height=100, key=f"bd_{idx}")
-        upd['Description'] = st.text_area("Lang Annoncetekst", value=row.get('Description'), height=200, key=f"de_{idx}")
-        upd['Tracking_URL'] = st.text_input("QR Tracking URL", value=row.get('Tracking_URL'), key=f"tr_{idx}")
+        upd['Description'] = st.text_area("Lang Beskrivelse", value=row.get('Description'), height=200, key=f"de_{idx}")
+        upd['Tracking_URL'] = st.text_input("Tracking URL", value=row.get('Tracking_URL'), key=f"tr_{idx}")
     with t5:
         upd['Noter'] = st.text_area("CRM Logbog", value=row.get('Noter'), height=200, key=f"no_{idx}")
         c1, c2 = st.columns(2)
@@ -231,13 +215,13 @@ def lead_popup(idx):
 
 # --- 8. SIDEBAR ---
 with st.sidebar:
-    st.header(f"👤 {st.session_state.username}")
-    with st.expander("📸 AI Scanner"):
-        if cam := st.camera_input("Scan visitkort"):
-            with st.spinner("Analyse..."):
+    st.header(f"👤 {st.session_state.get('username','admin')}")
+    with st.expander("📸 AI Card Scanner"):
+        if cam := st.camera_input("Tag billede"):
+            with st.spinner("AI tænker..."):
                 ai = analyze_image_with_ai(cam.read())
                 nr = {c: "" for c in MASTER_COLS}
-                nr.update(ai); nr['Date created'] = date.today().strftime('%d/%m/%Y')
+                nr.update(ai); nr['Date created'] = date.today().strftime('%d/%m/%Y'); nr['Leadtype'] = "AI Scan"
                 st.session_state.df_leads = pd.concat([st.session_state.df_leads, pd.DataFrame([nr])], ignore_index=True)
                 save_db(st.session_state.df_leads); st.rerun()
 
@@ -247,17 +231,13 @@ with st.sidebar:
             labels = [("Agent", "agents"), ("Branche", "brancher"), ("Underbranche", "underbrancher"), ("Region", "regions"), ("Område", "areas"), ("Status", "status"), ("Sprog", "sprog"), ("Titel", "titles"), ("Medlemskab", "memberships"), ("Annonceprofil", "advertising"), ("Kilde", "lead_types")]
             for label, key in labels:
                 st.markdown(f"**{label}**")
-                v_new = st.text_input(f"Ny {label}:", key=f"a_{key}")
-                if st.button(f"Tilføj til {label}", key=f"b_{key}"):
-                    if db_execute("INSERT INTO pg_settings (type, value) VALUES (:t, :v)", {"t": key, "v": v_new}):
+                v_new = st.text_input(f"Ny {label}:", key=f"add_{key}")
+                if st.button(f"Tilføj til {label}", key=f"btn_{key}"):
+                    if db_execute("INSERT INTO crm_configs (type, value) VALUES (:t, :v)", {"t": key, "v": v_new}):
                         st.success("Gemt!"); st.rerun()
-            
-            if st.button("🚨 NULSTIL DB", type="secondary"):
-                with db_engine.begin() as conn: conn.execute(text("DROP TABLE IF EXISTS merchants_playground"))
-                st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS); st.rerun()
 
     st.divider()
-    st.subheader("🎯 Kampagne Filtre")
+    st.subheader("🎯 Filtre")
     f_ag = st.multiselect("Agent:", opts['agents'])
     f_st = st.multiselect("Status:", opts['status'])
     f_br = st.multiselect("Branche:", opts['brancher'])
@@ -272,7 +252,7 @@ with st.sidebar:
     if st.button("🚪 Log ud"): st.session_state.authenticated = False; st.rerun()
 
 # --- 9. DASHBOARD ---
-st.title("💼 Business Master Master AI")
+st.title("💼 Business CRM Master AI")
 df_v = st.session_state.df_leads.copy()
 if f_ag: df_v = df_v[df_v['Agent'].isin(f_ag)]
 if f_st: df_v = df_v[df_v['Status on lead'].isin(f_st)]
@@ -285,4 +265,4 @@ if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, c
 sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="single-row", on_select="rerun", height=600)
 if sel.selection.rows:
     real_idx = df_v.index[sel.selection.rows[0]]
-    lead_popup(real_idx) 
+    lead_popup(real_idx)
