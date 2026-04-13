@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, text
 from datetime import datetime, date
 
 # --- 1. KONFIGURATION ---
-st.set_page_config(page_title="Lead Master Playground", layout="wide", page_icon="🎯")
+st.set_page_config(page_title="Business & Lead Master", layout="wide", page_icon="🎯")
 
 # --- 2. DATABASE ---
 @st.cache_resource
@@ -23,25 +23,27 @@ def get_engine():
 
 db_engine = get_engine()
 
-# --- 3. MASTER STRUKTUR (ALT INDHOLD) ---
+# --- 3. MASTER STRUKTUR (UDVIDET) ---
 MASTER_COLS = [
-    'Date created', 'Company Name', 'Brancher', 'Underbrancher', 'Area', 'Town', 
-    'Status on lead', 'Membership', 'CIF Number VAT', 'Business Description', 
-    'Postal Code', 'Exact Location', 'Website', 'Email', 'Phone number', 
-    'Address', 'Work time', 'Languages', 'Description', 'Date for follow up', 
-    'Advertising', 'Pricelist', 'Agent', 'Leadtype', 'Tracking_URL', 'Noter'
+    'Date created', 'Company Name', 'Brancher', 'Underbrancher', 'Region', 'Area', 'Town', 
+    'Kontaktperson', 'Titel', 'Phone number', 'Mobilnr', 'WhatsApp', 'Telegram', 
+    'Email', 'Website', 'Facebook', 'Instagram', 'Status on lead', 'Membership', 
+    'Leadtype', 'Agent', 'Date for follow up', 'Address', 'Postal Code', 'Exact Location', 
+    'Work time', 'Languages', 'Business Description', 'Description', 'Tracking_URL', 'Noter'
 ]
 
 # Oversigt på forsiden
-DISPLAY_COLS = ['Date created', 'Company Name', 'Brancher', 'Area', 'Status on lead', 'Membership']
+DISPLAY_COLS = ['Date created', 'Company Name', 'Brancher', 'Region', 'Area', 'Status on lead', 'Kontaktperson']
 
-# --- 4. DROPDOWN VALGMULIGHEDER (MULTI-CHOICE) ---
+# --- 4. DROPDOWN VALGMULIGHEDER ---
 DEFAULTS = {
+    "regions": ["Andalucía", "Cataluña", "Madrid", "Valenciana", "Galicia", "Castilla y León", "País Vasco", "Canarias", "Castilla-La Mancha", "Murcia", "Aragón", "Extremadura", "Baleares", "Asturias", "Navarra", "Cantabria", "La Rioja"],
+    "areas": ["Costa del Sol", "Costa Blanca", "Costa Brava", "Costa de la Luz", "Costa Almería", "Mallorca", "Ibiza", "Madrid City", "Barcelona City"],
+    "lead_types": ["Inbound (Form)", "Outbound (Cold)", "SoMe Lead", "Google Search", "Reference", "Messe", "Andet"],
+    "agents": ["Brian", "Agent 1", "Agent 2", "Partner"],
     "brancher": ["Ejendomsmægler", "Restaurant", "Håndværker", "Advokat", "Butik", "Service", "Turisme", "Andet"],
-    "underbrancher": ["Boligsalg", "Udlejning", "Tapas", "Take-away", "VVS", "El", "Tømrer", "Skønhed", "IT"],
     "sprog": ["Dansk", "Engelsk", "Spansk", "Svensk", "Norsk", "Tysk", "Fransk", "Hollandsk"],
-    "status": ["Ny", "Dialog", "Vundet", "Tabt", "Opfølgning", "Pause"],
-    "membership": ["Ingen", "Gratis", "Basis", "Premium", "VIP"]
+    "status": ["Ny", "Dialog", "Vundet", "Tabt", "Opfølgning", "Pause"]
 }
 
 # --- 5. HJÆLPEFUNKTIONER ---
@@ -75,64 +77,68 @@ if 'df_leads' not in st.session_state:
     except:
         st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS)
 
-# --- 6. DET NYE POPUP KORT (4 FANER) ---
-@st.dialog("🎯 Lead Administration", width="large")
+# --- 6. DET STORE KLIENT KORT (5 FANER) ---
+@st.dialog("🎯 Business Lead Administration", width="large")
 def lead_popup(idx):
     row = st.session_state.df_leads.loc[idx].to_dict()
     st.title(f"🏢 {row.get('Company Name') or 'Nyt Lead'}")
     st.divider()
     
-    t1, t2, t3, t4 = st.tabs(["📌 Basis & Kontakt", "📂 Brancher & Sprog", "⚙️ Salg & Pipeline", "📝 Beskrivelse & Noter"])
+    t1, t2, t3, t4, t5 = st.tabs(["📞 Kontaktperson", "🌍 Område & Branche", "⚙️ Salg & Pipeline", "📱 Web & SoMe", "📝 Noter"])
     upd = {}
 
     with t1:
         c1, c2 = st.columns(2)
         with c1:
             upd['Company Name'] = st.text_input("Virksomhedsnavn (Legal)", value=row.get('Company Name'))
-            upd['CIF Number VAT'] = st.text_input("CIF / VAT Nummer", value=row.get('CIF Number VAT'))
-            upd['Email'] = st.text_input("E-mail", value=row.get('Email'))
-            upd['Phone number'] = st.text_input("Telefon", value=row.get('Phone number'))
+            upd['Kontaktperson'] = st.text_input("Kontaktperson", value=row.get('Kontaktperson'))
+            upd['Titel'] = st.text_input("Titel (Ejer, Manager, etc.)", value=row.get('Titel'))
+            upd['Email'] = st.text_input("Hoved E-mail", value=row.get('Email'))
         with c2:
-            upd['Website'] = st.text_input("Hjemmeside URL", value=row.get('Website'))
-            upd['Tracking_URL'] = st.text_input("🔗 QR / Tracking Link", value=row.get('Tracking_URL'))
-            upd['Address'] = st.text_input("Adresse", value=row.get('Address'))
-            upd['Town'] = st.text_input("By / Postnr", value=row.get('Town'))
+            upd['Phone number'] = st.text_input("Telefon (Kontor)", value=row.get('Phone number'))
+            upd['Mobilnr'] = st.text_input("Mobilnummer", value=row.get('Mobilnr'))
+            upd['WhatsApp'] = st.text_input("WhatsApp (Link eller nr)", value=row.get('WhatsApp'))
+            upd['Telegram'] = st.text_input("Telegram (Brugernavn)", value=row.get('Telegram'))
 
     with t2:
         c1, c2 = st.columns(2)
         with c1:
-            # MULTI-SELECT BRANCHER
-            current_br = [x.strip() for x in str(row.get('Brancher')).split(',')] if row.get('Brancher') else []
-            upd['Brancher'] = ", ".join(st.multiselect("Vælg Branche(r)", DEFAULTS['brancher'], default=[x for x in current_br if x in DEFAULTS['brancher']]))
-            
-            # MULTI-SELECT UNDERBRANCHER
-            current_ubr = [x.strip() for x in str(row.get('Underbrancher')).split(',')] if row.get('Underbrancher') else []
-            upd['Underbrancher'] = ", ".join(st.multiselect("Vælg Underbranche(r)", DEFAULTS['underbrancher'], default=[x for x in current_ubr if x in DEFAULTS['underbrancher']]))
-        
+            # Region & Område Dropdowns
+            upd['Region'] = st.selectbox("Region (Spanien)", DEFAULTS['regions'], index=DEFAULTS['regions'].index(row.get('Region')) if row.get('Region') in DEFAULTS['regions'] else 0)
+            upd['Area'] = st.selectbox("Område / Kyst", DEFAULTS['areas'], index=DEFAULTS['areas'].index(row.get('Area')) if row.get('Area') in DEFAULTS['areas'] else 0)
+            upd['Town'] = st.text_input("By", value=row.get('Town'))
+            upd['Postal Code'] = st.text_input("Postnummer", value=row.get('Postal Code'))
         with c2:
-            # MULTI-SELECT SPROG
-            current_lang = [x.strip() for x in str(row.get('Languages')).split(',')] if row.get('Languages') else []
-            upd['Languages'] = ", ".join(st.multiselect("Sprog talt i virksomheden", DEFAULTS['sprog'], default=[x for x in current_lang if x in DEFAULTS['sprog']]))
-            
-            upd['Area'] = st.text_input("Område (f.eks. Costa del Sol)", value=row.get('Area'))
+            current_br = [x.strip() for x in str(row.get('Brancher')).split(',')] if row.get('Brancher') else []
+            upd['Brancher'] = ", ".join(st.multiselect("Hovedbranche(r)", DEFAULTS['brancher'], default=[x for x in current_br if x in DEFAULTS['brancher']]))
+            upd['Address'] = st.text_input("Vejnavn & Nr.", value=row.get('Address'))
             upd['Work time'] = st.text_input("Åbningstider", value=row.get('Work time'))
 
     with t3:
         c1, c2 = st.columns(2)
         with c1:
             upd['Status on lead'] = st.selectbox("Pipeline Status", DEFAULTS['status'], index=DEFAULTS['status'].index(row.get('Status on lead')) if row.get('Status on lead') in DEFAULTS['status'] else 0)
-            upd['Membership'] = st.selectbox("Medlemskab", DEFAULTS['membership'], index=DEFAULTS['membership'].index(row.get('Membership')) if row.get('Membership') in DEFAULTS['membership'] else 0)
-            upd['Agent'] = st.text_input("Ansvarlig Agent", value=row.get('Agent'))
+            upd['Leadtype'] = st.selectbox("Kilde / Leadtype", DEFAULTS['lead_types'], index=DEFAULTS['lead_types'].index(row.get('Leadtype')) if row.get('Leadtype') in DEFAULTS['lead_types'] else 0)
+            upd['Agent'] = st.selectbox("Ansvarlig Agent", DEFAULTS['agents'], index=DEFAULTS['agents'].index(row.get('Agent')) if row.get('Agent') in DEFAULTS['agents'] else 0)
         with c2:
-            # KALENDER VÆLGERE
-            upd['Date created'] = st.date_input("Oprettet den", value=get_safe_date(row.get('Date created'))).strftime('%d/%m/%Y')
-            upd['Date for follow up'] = st.date_input("Næste opfølgning", value=get_safe_date(row.get('Date for follow up'))).strftime('%d/%m/%Y')
-            upd['Leadtype'] = st.text_input("Kilde / Leadtype", value=row.get('Leadtype'))
+            upd['Date created'] = st.date_input("Oprettet", value=get_safe_date(row.get('Date created'))).strftime('%d/%m/%Y')
+            upd['Date for follow up'] = st.date_input("Opfølgning", value=get_safe_date(row.get('Date for follow up'))).strftime('%d/%m/%Y')
+            upd['Membership'] = st.selectbox("Medlemskab", ["Ingen", "Gratis", "Basis", "Premium", "VIP"], index=0)
 
     with t4:
-        upd['Business Description'] = st.text_input("Kort Pitch (Slogan)", value=row.get('Business Description'))
-        upd['Description'] = st.text_area("Lang beskrivelse (Annoncetekst)", value=row.get('Description'), height=150)
-        upd['Noter'] = st.text_area("Interne noter / Logbog", value=row.get('Noter'), height=150)
+        c1, c2 = st.columns(2)
+        with c1:
+            upd['Website'] = st.text_input("Website URL", value=row.get('Website'))
+            upd['Facebook'] = st.text_input("Facebook Page", value=row.get('Facebook'))
+            upd['Instagram'] = st.text_input("Instagram Profil", value=row.get('Instagram'))
+        with c2:
+            upd['Tracking_URL'] = st.text_input("🔗 QR / Tracking Link", value=row.get('Tracking_URL'))
+            upd['Exact Location'] = st.text_input("Google Maps Link", value=row.get('Exact Location'))
+
+    with t5:
+        upd['Business Description'] = st.text_input("Kort Pitch", value=row.get('Business Description'))
+        upd['Description'] = st.text_area("Annoncetekst (Lang)", value=row.get('Description'), height=100)
+        upd['Noter'] = st.text_area("Interne CRM Noter", value=row.get('Noter'), height=200)
 
     if st.button("💾 GEM LEAD DATA", type="primary", use_container_width=True):
         for k,v in upd.items(): st.session_state.df_leads.at[idx, k] = v
@@ -144,48 +150,46 @@ with st.sidebar:
     
     if st.button("➕ OPRET NYT LEAD", use_container_width=True, type="primary"):
         new_row = pd.DataFrame([{c: "" for c in MASTER_COLS}])
-        new_row['Date created'] = date.today().strftime('%d/%m/%Y') # Sætter automatisk dags dato
+        new_row['Date created'] = date.today().strftime('%d/%m/%Y')
         st.session_state.df_leads = pd.concat([st.session_state.df_leads, new_row], ignore_index=True)
         save_db(st.session_state.df_leads)
         st.rerun()
 
     st.divider()
-    # KATEGORI FILTER
-    st.subheader("Filter")
-    filter_brancher = st.multiselect("Vis kun Brancher:", DEFAULTS['brancher'])
+    filter_region = st.multiselect("Region Filter:", DEFAULTS['regions'])
+    filter_status = st.multiselect("Status Filter:", DEFAULTS['status'])
 
     st.divider()
-    f_up = st.file_uploader("Importér Excel/CSV")
+    f_up = st.file_uploader("Importér Leads (CSV/Excel)")
     if f_up and st.button("Flet & Gem"):
         nd = pd.read_csv(f_up) if f_up.name.endswith('csv') else pd.read_excel(f_up)
-        # Sæt dags dato på nye leads der ikke har en dato
-        if 'Date created' not in nd.columns: nd['Date created'] = date.today().strftime('%d/%m/%Y')
         st.session_state.df_leads = force_clean(pd.concat([st.session_state.df_leads, nd], ignore_index=True))
         save_db(st.session_state.df_leads); st.rerun()
 
-    if st.button("🚨 Nulstil Database"):
+    if st.button("🚨 Nulstil Playground DB"):
         if db_engine:
             with db_engine.connect() as conn:
                 conn.execute(text("DROP TABLE IF EXISTS merchants_playground"))
                 conn.commit()
         st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS); st.rerun()
 
-# --- 8. HOVEDVISNING ---
-st.title("💼 CRM Playground")
+# --- 8. DASHBOARD ---
+st.title("💼 Business Leads Playground")
 
 df_display = st.session_state.df_leads.copy()
 
-# Anvend sidebar filtre
-if filter_brancher:
-    df_display = df_display[df_display['Brancher'].apply(lambda x: any(b in x for b in filter_brancher))]
+# Filtre
+if filter_region:
+    df_display = df_display[df_display['Region'].isin(filter_region)]
+if filter_status:
+    df_display = df_display[df_display['Status on lead'].isin(filter_status)]
 
-search = st.text_input("🔍 Søg i navne, byer, noter...", "")
+search = st.text_input("🔍 Søg i alt (Navn, Person, By, Noter...)", "")
 if search:
     df_display = df_display[df_display.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
 
-st.write(f"Viser **{len(df_display)}** leads")
+st.write(f"Antal leads i view: **{len(df_display)}**")
 
-# Tabellen viser kun DISPLAY_COLS
 sel = st.dataframe(
     df_display[DISPLAY_COLS], 
     use_container_width=True, 
