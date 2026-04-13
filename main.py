@@ -265,4 +265,4 @@ if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, c
 sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="single-row", on_select="rerun", height=600)
 if sel.selection.rows:
     real_idx = df_v.index[sel.selection.rows[0]]
-    lead_popup(real_idx)
+    lead_popup(real_idx) 
