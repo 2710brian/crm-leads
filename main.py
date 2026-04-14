@@ -12,11 +12,11 @@ import json
 # --- 1. KONFIGURATION ---
 st.set_page_config(page_title="Business CRM Master AI", layout="wide", page_icon="🎯")
 
-# --- 2. SPROG-DATABASE (FIXET FOR KEYERRORS) ---
+# --- 2. SPROG-DATABASE ---
 TRANSLATIONS = {
     "🇩🇰 Dansk": {
         "title": "Business CRM Master AI", "login_title": "CRM Login", "login_btn": "LOG IND", "logout": "🚪 Log ud",
-        "search": "🔍 Søg i alt data...", "total_leads": "Viste leads: {n}", "click_info": "💡 Klik på rækken til venstre for at åbne kortet.",
+        "search": "🔍 Søg i alt data...", "total_leads": "Viste leads: {n}", "click_info": "💡 Klik til venstre for at åbne kortet.",
         "sidebar_scan": "📸 AI Card Scanner", "sidebar_filter": "🎯 Kampagne Filtre", "sidebar_admin": "🛠️ Admin Kontrol",
         "sidebar_user": "👤 Brugerstyring", "sidebar_export": "📤 Eksport", "btn_create": "➕ OPRET MANUELT",
         "btn_save": "💾 GEM ALT PÅ KLIENT", "btn_delete": "🗑️ SLET", "tab1": "📞 Kontakt & Social",
@@ -95,12 +95,14 @@ def check_login():
     rail_u, rail_p = os.getenv("APP_USER", "admin"), os.getenv("APP_PASSWORD", "mgm2024")
     if u == rail_u and p == rail_p:
         st.session_state.authenticated, st.session_state.user_role, st.session_state.username = True, "admin", u
+        st.rerun()
     elif db_engine:
         with db_engine.connect() as conn:
             res = conn.execute(text("SELECT password, role FROM users WHERE username = :u"), {"u": u}).fetchone()
             if res and res[0] == p:
                 st.session_state.authenticated, st.session_state.user_role, st.session_state.username = True, res[1], u
                 st.rerun()
+            else: st.error("❌ Login failed")
 
 if not st.session_state.authenticated:
     st.session_state.lang_choice = st.selectbox("🌐 Choose Language", list(TRANSLATIONS.keys()))
@@ -113,10 +115,10 @@ if not st.session_state.authenticated:
         st.button(l_login['login_btn'], type="primary", use_container_width=True, on_click=check_login)
     st.stop()
 
-# Aktiver valgt sprog
+# Aktiver sprog
 L = TRANSLATIONS[st.session_state.lang_choice]
 
-# --- 5. MASTER DEFINITIONER ---
+# --- 5. DATA LOGIK ---
 MASTER_COLS = [
     'Date created', 'Company Name', 'CIF Number VAT', 'Brancher', 'Underbrancher', 'Region', 'Area', 'Town', 
     'Postal Code', 'Address', 'Exact Location', 'Kontaktperson', 'Titel', 'Email', 
@@ -130,19 +132,22 @@ DISPLAY_COLS = ['Date created', 'Company Name', 'Brancher', 'Town', 'Status on l
 def load_options():
     defaults = {
         "agents": ["Brian", "Olga"], "brancher": ["Ejendomsmægler", "Restaurant", "Håndværker"],
-        "underbrancher": ["Boligsalg", "Take-away", "VVS"], "status": ["Ny", "Dialog", "Vundet"],
+        "underbrancher": ["Boligsalg", "Take-away"], "status": ["Ny", "Dialog", "Vundet"],
         "sprog": ["Dansk", "Engelsk", "Spansk"], "regions": ["Andalucía", "Madrid"],
         "areas": ["Costa del Sol"], "titles": ["CEO", "Ejer"], "memberships": ["Ingen", "Basis"],
         "advertising": ["Ingen", "Standard"], "lead_types": ["Inbound", "AI Scan"]
     }
+    db_opts = {k: [] for k in defaults.keys()}
     if db_engine:
         try:
             df_opt = pd.read_sql("SELECT * FROM crm_configs", db_engine)
             for key in defaults.keys():
                 stored = df_opt[df_opt['type'] == key]['value'].tolist()
-                if stored: defaults[key] = sorted(list(set(defaults[key] + stored)))
+                if stored:
+                    db_opts[key] = stored
+                    defaults[key] = sorted(list(set(defaults[key] + stored)))
         except: pass
-    return defaults
+    return defaults, db_opts
 
 def force_clean(df):
     if df.empty: return pd.DataFrame(columns=MASTER_COLS)
@@ -161,13 +166,12 @@ def save_db(df):
         return True
     return False
 
-# Data
 if 'df_leads' not in st.session_state:
     try: st.session_state.df_leads = force_clean(pd.read_sql("SELECT * FROM merchants_playground", db_engine))
     except: st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS)
-opts = load_options()
+opts, db_custom_opts = load_options()
 
-# --- 6. KLIENT KORT POPUP ---
+# --- 6. POPUP KORT ---
 @st.dialog("🎯 CRM", width="large")
 def lead_popup(idx):
     row = st.session_state.df_leads.loc[idx].to_dict()
@@ -243,28 +247,40 @@ def lead_popup(idx):
 
 # --- 7. SIDEBAR ---
 with st.sidebar:
-    st.session_state.lang_choice = st.selectbox("🌐 Language", list(TRANSLATIONS.keys()))
+    st.session_state.lang_choice = st.selectbox("🌐 Sprog", list(TRANSLATIONS.keys()))
     st.header(f"👤 {st.session_state.username}")
     
-    # ADMIN
     if st.session_state.user_role == "admin":
         with st.expander(L['sidebar_admin']):
-            labels = [("Agent", "agents"), ("Branche", "brancher"), ("Status", "status"), ("Sprog", "sprog")]
-            for lab, key in labels:
-                v_new = st.text_input(f"Add {lab}:", key=f"ad_{key}")
-                if st.button(f"Save {lab}", key=f"bt_{key}"):
-                    with db_engine.begin() as conn: conn.execute(text("INSERT INTO crm_configs (type, value) VALUES (:t, :v)"), {"t": key, "v": v_new})
+            cat = st.selectbox("Kategori:", ["agents", "brancher", "status", "sprog", "regions", "areas"])
+            v_new = st.text_input("Tilføj ny:")
+            if st.button("💾 Tilføj"):
+                with db_engine.begin() as conn: conn.execute(text("INSERT INTO crm_configs (type, value) VALUES (:t,:v)"), {"t":cat, "v":v_new})
+                st.rerun()
+            if db_custom_opts[cat]:
+                v_del = st.selectbox("Slet fra database:", ["Vælg..."] + db_custom_opts[cat])
+                if v_del != "Vælg..." and st.button("🗑️ Slet valgte"):
+                    with db_engine.begin() as conn: conn.execute(text("DELETE FROM crm_configs WHERE type=:t AND value=:v"), {"t":cat, "v":v_del})
                     st.rerun()
+
         with st.expander(L['sidebar_user']):
-            nu, np = st.text_input("Username"), st.text_input("Password", type="password")
-            if st.button("Create"):
-                with db_engine.begin() as conn: conn.execute(text("INSERT INTO users VALUES (:u,:p,'agent')"), {"u":nu,"p":np})
+            nu, np, nr = st.text_input("Bruger"), st.text_input("Kode", type="password"), st.selectbox("Rolle", ["agent", "admin"])
+            if st.button("Opret"):
+                with db_engine.begin() as conn: conn.execute(text("INSERT INTO users VALUES (:u,:p,:r)"), {"u":nu,"p":np,"r":nr})
                 st.success("OK")
+            with db_engine.connect() as conn: u_list = [r[0] for r in conn.execute(text("SELECT username FROM users WHERE username != 'admin'")).fetchall()]
+            if u_list:
+                ud = st.selectbox("Fjern bruger:", ["Vælg..."] + u_list)
+                if ud != "Vælg..." and st.button("🗑️ Slet bruger"):
+                    with db_engine.begin() as conn: conn.execute(text("DELETE FROM users WHERE username=:u"), {"u":ud})
+                    st.rerun()
 
     st.header(L['sidebar_filter'])
     f_ag = st.multiselect(L['field_agent'], opts['agents'])
     f_st = st.multiselect(L['field_st'], opts['status'])
     f_br = st.multiselect(L['field_br'], opts['brancher'])
+    f_re = st.multiselect(L['field_reg'], opts['regions'])
+    f_ar = st.multiselect(L['field_area'], opts['areas'])
 
     st.divider()
     if st.button(L['btn_create'], type="primary", use_container_width=True):
@@ -280,6 +296,8 @@ search = st.text_input(L['search'])
 df_v = st.session_state.df_leads.copy()
 if f_ag: df_v = df_v[df_v['Agent'].isin(f_ag)]
 if f_st: df_v = df_v[df_v['Status on lead'].isin(f_st)]
+if f_re: df_v = df_v[df_v['Region'].isin(f_re)]
+if f_ar: df_v = df_v[df_v['Area'].isin(f_ar)]
 if f_br: df_v = df_v[df_v['Brancher'].apply(lambda x: any(b in x for b in f_br))]
 if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
 
