@@ -10,35 +10,27 @@ from openai import OpenAI
 import json
 
 # --- 1. KONFIGURATION ---
-st.set_page_config(page_title="Business CRM Pro AI", layout="wide", page_icon="🎯")
+st.set_page_config(page_title="Business Master CRM AI", layout="wide", page_icon="🎯")
 
-# --- 2. DATABASE MOTOR (FORCE NEW CONFIG TABLE) ---
+# --- 2. DATABASE MOTOR ---
 @st.cache_resource
 def get_engine():
     db_url = os.getenv("DATABASE_URL")
     if not db_url: return None
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
-    
     try:
-        engine = create_engine(db_url, pool_pre_ping=True)
+        engine = create_engine(db_url, pool_size=10, max_overflow=20, pool_pre_ping=True)
         with engine.begin() as conn:
-            # 1. Leads tabel (Vi rører ikke dine data)
             conn.execute(text("CREATE TABLE IF NOT EXISTS merchants_playground (id SERIAL PRIMARY KEY, data JSONB)"))
-            # 2. Bruger tabel
             conn.execute(text("CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password TEXT, role TEXT)"))
-            # 3. NY INDSTILLINGS TABEL (Omdøbt for at undgå din fejl)
             conn.execute(text("CREATE TABLE IF NOT EXISTS crm_configs (id SERIAL PRIMARY KEY, type TEXT, value TEXT)"))
-            
-            # Opret admin hvis tom
             res = conn.execute(text("SELECT COUNT(*) FROM users")).fetchone()
             if res[0] == 0:
                 u, p = os.getenv("APP_USER", "admin"), os.getenv("APP_PASSWORD", "mgm2024")
                 conn.execute(text("INSERT INTO users VALUES (:u, :p, 'admin')"), {"u": u, "p": p})
         return engine
-    except Exception as e:
-        st.error(f"Kritisk fejl: {e}")
-        return None
+    except: return None
 
 db_engine = get_engine()
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -52,7 +44,7 @@ def db_execute(query, params=None):
         st.error(f"Databasefejl: {e}")
         return False
 
-# --- 3. AI SCANNER (GPT-4o) ---
+# --- 3. AI & LOGIN (Kortet ned for overblik) ---
 def analyze_image_with_ai(image_bytes):
     if not os.getenv("OPENAI_API_KEY"): return {"Company Name": "Mangler API Key"}
     b64_image = base64.b64encode(image_bytes).decode('utf-8')
@@ -60,7 +52,7 @@ def analyze_image_with_ai(image_bytes):
         response = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": [
-                {"type": "text", "text": "Extract business card info into JSON. Keys: Company Name, CIF Number VAT, Kontaktperson, Email, Phone number, Website, Town, Address."},
+                {"type": "text", "text": "Extract info into JSON: Company Name, CIF Number VAT, Kontaktperson, Email, Phone number, Website, Town, Address."},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
             ]}],
             response_format={ "type": "json_object" }
@@ -68,7 +60,6 @@ def analyze_image_with_ai(image_bytes):
         return json.loads(response.choices[0].message.content)
     except: return {"Company Name": "AI Fejl"}
 
-# --- 4. LOGIN ---
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
 
 def check_login():
@@ -81,10 +72,10 @@ def check_login():
             res = conn.execute(text("SELECT password, role FROM users WHERE username = :u"), {"u": u}).fetchone()
             if res and res[0] == p:
                 st.session_state.authenticated, st.session_state.user_role, st.session_state.username = True, res[1], u
-            else: st.error("❌ Ugyldig login")
+            else: st.error("❌ Login fejlede")
 
 if not st.session_state.authenticated:
-    st.title("💼 CRM Login")
+    st.title("💼 CRM Master Login")
     _, col, _ = st.columns([1, 1, 1])
     with col:
         st.text_input("Brugernavn", key="l_u")
@@ -92,7 +83,7 @@ if not st.session_state.authenticated:
         st.button("LOG IND", type="primary", use_container_width=True, on_click=check_login)
     st.stop()
 
-# --- 5. MASTER DATA & OPTIONER ---
+# --- 4. DATA STRUKTUR ---
 MASTER_COLS = [
     'Date created', 'Company Name', 'CIF Number VAT', 'Brancher', 'Underbrancher', 'Region', 'Area', 'Town', 
     'Postal Code', 'Address', 'Exact Location', 'Kontaktperson', 'Titel', 'Email', 
@@ -117,17 +108,19 @@ def load_options():
         "advertising": ["Ingen", "Standard Profil", "Premium Eksponering", "Banner kampagne"],
         "lead_types": ["Inbound", "Outbound", "AI Scan", "Reference"]
     }
+    custom_only = {k: [] for k in defaults.keys()}
     if db_engine:
         try:
-            # Vi læser fra den NYE tabel crm_configs
             df_opt = pd.read_sql("SELECT * FROM crm_configs", db_engine)
             for key in defaults.keys():
                 stored = df_opt[df_opt['type'] == key]['value'].tolist()
-                if stored: defaults[key] = sorted(list(set(defaults[key] + stored)))
+                if stored:
+                    custom_only[key] = stored # Gemmer kun dem fra DB til slette-listen
+                    defaults[key] = sorted(list(set(defaults[key] + stored)))
         except: pass
-    return defaults
+    return defaults, custom_only
 
-# --- 6. RENSE- OG GEMME-MOTOR ---
+# --- 5. CRM MOTOR ---
 def force_clean(df):
     if df.empty: return pd.DataFrame(columns=MASTER_COLS)
     df = df.loc[:, ~df.columns.duplicated()].copy()
@@ -148,10 +141,10 @@ def save_db(df):
 if 'df_leads' not in st.session_state:
     try: st.session_state.df_leads = force_clean(pd.read_sql("SELECT * FROM merchants_playground", db_engine))
     except: st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS)
-opts = load_options()
+opts, custom_opts = load_options()
 
-# --- 7. KLIENT KORT POPUP ---
-@st.dialog("🎯 Lead Administration", width="large")
+# --- 6. POPUP ---
+@st.dialog("🎯 Lead Detaljer & CRM", width="large")
 def lead_popup(idx):
     row = st.session_state.df_leads.loc[idx].to_dict()
     c1, c2 = st.columns([0.8, 0.2])
@@ -198,8 +191,8 @@ def lead_popup(idx):
                 upd[f] = st.date_input(f, value=d_v, key=f"{f}_{idx}").strftime('%d/%m/%Y')
     with t4:
         upd['Business Description'] = st.text_area("Kort Pitch", value=row.get('Business Description'), height=100, key=f"bd_{idx}")
-        upd['Description'] = st.text_area("Lang Beskrivelse", value=row.get('Description'), height=200, key=f"de_{idx}")
-        upd['Tracking_URL'] = st.text_input("Tracking URL", value=row.get('Tracking_URL'), key=f"tr_{idx}")
+        upd['Description'] = st.text_area("Lang Annoncetekst", value=row.get('Description'), height=200, key=f"de_{idx}")
+        upd['Tracking_URL'] = st.text_input("QR Tracking URL", value=row.get('Tracking_URL'), key=f"tr_{idx}")
     with t5:
         upd['Noter'] = st.text_area("CRM Logbog", value=row.get('Noter'), height=200, key=f"no_{idx}")
         c1, c2 = st.columns(2)
@@ -213,9 +206,9 @@ def lead_popup(idx):
         for k,v in upd.items(): st.session_state.df_leads.at[idx, k] = v
         if save_db(st.session_state.df_leads): st.rerun()
 
-# --- 8. SIDEBAR ---
+# --- 7. SIDEBAR ---
 with st.sidebar:
-    st.header(f"👤 {st.session_state.get('username','admin')}")
+    st.header(f"👤 {st.session_state.username}")
     with st.expander("📸 AI Card Scanner"):
         if cam := st.camera_input("Tag billede"):
             with st.spinner("AI tænker..."):
@@ -228,16 +221,28 @@ with st.sidebar:
     if st.session_state.user_role == "admin":
         st.divider()
         with st.expander("🛠️ Dropdown Administration"):
-            labels = [("Agent", "agents"), ("Branche", "brancher"), ("Underbranche", "underbrancher"), ("Region", "regions"), ("Område", "areas"), ("Status", "status"), ("Sprog", "sprog"), ("Titel", "titles"), ("Medlemskab", "memberships"), ("Annonceprofil", "advertising"), ("Kilde", "lead_types")]
+            labels = [("Agent", "agents"), ("Branche", "brancher"), ("Status", "status"), ("Sprog", "sprog"), ("Medlemskab", "memberships"), ("Region", "regions"), ("Område", "areas")]
             for label, key in labels:
                 st.markdown(f"**{label}**")
-                v_new = st.text_input(f"Ny {label}:", key=f"add_{key}")
-                if st.button(f"Tilføj til {label}", key=f"btn_{key}"):
+                v_new = st.text_input(f"Tilføj {label}:", key=f"add_{key}")
+                if st.button(f"Tilføj", key=f"btn_a_{key}"):
                     if db_execute("INSERT INTO crm_configs (type, value) VALUES (:t, :v)", {"t": key, "v": v_new}):
-                        st.success("Gemt!"); st.rerun()
+                        st.success("Tilføjet!"); st.rerun()
+                
+                # SLET FUNKTION
+                if custom_opts[key]:
+                    v_del = st.selectbox(f"Slet fra {label}:", ["Vælg..."] + custom_opts[key], key=f"del_{key}")
+                    if v_del != "Vælg..." and st.button(f"Slet valgte", key=f"btn_d_{key}"):
+                        if db_execute("DELETE FROM crm_configs WHERE type = :t AND value = :v", {"t": key, "v": v_del}):
+                            st.success("Slettet!"); st.rerun()
+            
+            st.divider()
+            if st.button("🚨 NULSTIL DB", type="secondary"):
+                with db_engine.begin() as conn: conn.execute(text("DROP TABLE IF EXISTS merchants_playground"))
+                st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS); st.rerun()
 
     st.divider()
-    st.subheader("🎯 Filtre")
+    st.subheader("🎯 Kampagne Filtre")
     f_ag = st.multiselect("Agent:", opts['agents'])
     f_st = st.multiselect("Status:", opts['status'])
     f_br = st.multiselect("Branche:", opts['brancher'])
@@ -251,7 +256,7 @@ with st.sidebar:
     st.download_button("📥 Master Export", st.session_state.df_leads.to_csv(index=False), "master.csv", use_container_width=True)
     if st.button("🚪 Log ud"): st.session_state.authenticated = False; st.rerun()
 
-# --- 9. DASHBOARD ---
+# --- 8. DASHBOARD ---
 st.title("💼 Business CRM Master AI")
 df_v = st.session_state.df_leads.copy()
 if f_ag: df_v = df_v[df_v['Agent'].isin(f_ag)]
@@ -259,6 +264,7 @@ if f_st: df_v = df_v[df_v['Status on lead'].isin(f_st)]
 if f_re: df_v = df_v[df_v['Region'].isin(f_re)]
 if f_br: df_v = df_v[df_v['Brancher'].apply(lambda x: any(b in x for b in f_br))]
 if f_to: df_v = df_v[df_v['Town'].isin(f_to)]
+
 search = st.text_input("🔍 Søg...")
 if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
 
