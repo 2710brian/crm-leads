@@ -346,4 +346,4 @@ sel = st.dataframe(df_v[safe_display], use_container_width=True, selection_mode=
 
 if sel.selection.rows:
     real_idx = df_v.index[sel.selection.rows[0]]
-    lead_popup(real_idx)
+    lead_popup(real_idx) 
