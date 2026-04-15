@@ -380,4 +380,4 @@ if not clicked.empty:
 # BULK SELECTION (FLUEBEN TIL VENSTRE)
 st.info("💡 Bulk actions:")
 sel_bulk = st.dataframe(df_v[safe_display].drop(columns=['✏️']), use_container_width=True, selection_mode="multi-row", on_select="rerun", height=200)
-st.session_state.sel_rows = sel_bulk.selection.rows
+st.session_state.sel_rows = sel_bulk.selection.rows 
