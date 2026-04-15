@@ -358,4 +358,4 @@ st.write(L['total_leads'].format(n=len(df_v)))
 DISPLAY_ORDER = ['Client ID', 'Date created', 'Company Name', 'Region', 'Town', 'Status on lead']
 sel = st.dataframe(df_v[DISPLAY_ORDER], use_container_width=True, selection_mode="single-row", on_select="rerun", height=600)
 if sel.selection.rows:
-    lead_popup(df_v.index[sel.selection.rows[0]])
+    lead_popup(df_v.index[sel.selection.rows[0]]) 
