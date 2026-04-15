@@ -12,7 +12,7 @@ import json
 # --- 1. KONFIGURATION ---
 st.set_page_config(page_title="Business CRM Master AI Pro", layout="wide", page_icon="🎯")
 
-# --- 2. DATABASE MOTOR ---
+# --- 2. DATABASE MOTOR (POOL MANAGEMENT) ---
 @st.cache_resource
 def get_engine():
     db_url = os.getenv("DATABASE_URL")
@@ -35,7 +35,7 @@ db_engine = get_engine()
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # SIKKER DATABASE-FUNKTION
-def db_execute(query, params=None):
+def db_op(query, params=None):
     try:
         with db_engine.begin() as conn:
             conn.execute(text(query), params or {})
@@ -52,61 +52,84 @@ TRANSLATIONS = {
         "btn_save": "💾 GEM ALT PÅ KLIENT", "btn_delete": "🗑️ SLET LEAD", "btn_bulk_delete": "🗑️ SLET VALGTE",
         "tab1": "📞 Kontakt & Social", "tab2": "🌍 Geografi & Brancher", "tab3": "⚙️ Salg & Pipeline",
         "tab4": "📝 Beskrivelser", "tab5": "📁 Medier & Noter",
-        "f_id": "Klient ID", "f_name": "Virksomhed", "f_cif": "CIF / VAT", "f_person": "Kontaktperson", 
+        "f_id": "Klient ID", "f_name": "Virksomhed (Legal)", "f_cif": "CIF / VAT", "f_person": "Kontaktperson", 
         "f_title": "Titel", "f_mail": "E-mail", "f_phone": "Kontor Tlf", "f_mobile": "Mobil", "f_wa": "WhatsApp", 
-        "f_tg": "Telegram", "f_fb": "Facebook", "f_ig": "Instagram", "f_web": "Website", "f_reg": "Region", 
-        "f_area": "Område", "f_town": "By", "f_addr": "Adresse", "f_zip": "Postnr", "f_loc": "Maps Link", 
-        "f_br": "Branche", "f_ubr": "Underbranche", "f_lang": "Sprog", "f_work": "Timer", "f_st": "Status", 
-        "f_mem": "Medlem", "f_adv": "Annonce", "f_agent": "Agent", "f_src": "Kilde", "f_created": "Oprettet", 
-        "f_follow": "Opfølgning", "f_last": "Sidste kontakt", "f_pitch": "Kort Pitch", "f_desc": "Tekst", 
-        "f_qr": "QR Tracking URL", "f_notes": "Noter", "field_logo": "Logo", "field_docs": "Dokumenter", "field_gal": "Galleri", "f_type": "Område Type"
+        "f_tg": "Telegram", "f_fb": "Facebook", "f_ig": "Instagram", "f_web": "Website URL", "f_reg": "Region", 
+        "f_area": "Område", "f_town": "By", "f_addr": "Adresse", "f_zip": "Postnr.", "f_loc": "Google Maps Link", 
+        "f_br": "Brancher", "f_ubr": "Underbrancher", "f_lang": "Sprog", "f_work": "Åbningstider", "f_st": "Status", 
+        "f_mem": "Medlemskab", "f_adv": "Annonceprofil", "f_agent": "Agent", "f_src": "Kilde", "f_created": "Oprettet", 
+        "f_follow": "Opfølgning", "f_last": "Sidste kontakt", "f_pitch": "Kort Pitch", "f_desc": "Annoncetekst", 
+        "f_qr": "QR Tracking URL", "f_notes": "Interne CRM Noter", "field_logo": "Logo", "field_docs": "Dokumenter", "field_gal": "Galleri", "f_type": "Område Type"
     },
     "🇬🇧 English": {
         "title": "Business CRM AI Pro", "login_title": "CRM Login", "login_btn": "LOG IN", "logout": "🚪 Log out",
-        "search": "🔍 Search...", "total_leads": "Leads: {n}", "click_info": "💡 Click row on the left.",
+        "search": "🔍 Search...", "total_leads": "Leads: {n}", "click_info": "💡 Click row to open card.",
         "sidebar_scan": "📸 AI Scanner", "sidebar_filter": "🎯 Filters", "sidebar_admin": "🛠️ Admin",
         "sidebar_user": "👤 Users", "sidebar_export": "📤 Export", "btn_create": "➕ CREATE MANUAL",
         "btn_save": "💾 SAVE ALL", "btn_delete": "🗑️ DELETE", "btn_bulk_delete": "🗑️ DELETE SELECTED",
         "tab1": "📞 Contact", "tab2": "🌍 Geo", "tab3": "⚙️ Sales", "tab4": "📝 Desc", "tab5": "📁 Media",
         "f_id": "Client ID", "f_name": "Company", "f_cif": "CIF / VAT", "f_person": "Contact", 
-        "f_title": "Title", "f_mail": "Email", "f_phone": "Office", "f_mobile": "Mobile", "f_wa": "WhatsApp", 
+        "f_title": "Title", "f_mail": "Email", "f_phone": "Phone", "f_mobile": "Mobile", "f_wa": "WhatsApp", 
         "f_tg": "Telegram", "f_fb": "Facebook", "f_ig": "Instagram", "f_web": "Website", "f_reg": "Region", 
         "f_area": "Area", "f_town": "City", "f_addr": "Address", "f_zip": "Zip", "f_loc": "Maps Link", 
         "f_br": "Industry", "f_ubr": "Sub-industry", "f_lang": "Lang", "f_work": "Hours", "f_st": "Status", 
         "f_mem": "Member", "f_adv": "Ads", "f_agent": "Agent", "f_src": "Source", "f_created": "Created", 
-        "f_follow": "Follow up", "f_last": "Last contact", "f_pitch": "Pitch", "f_desc": "Description", 
+        "f_follow": "Follow up", "f_last": "Last contact", "f_pitch": "Pitch", "f_desc": "Long Desc", 
         "f_qr": "QR URL", "f_notes": "Notes", "field_logo": "Logo", "field_docs": "Docs", "field_gal": "Gallery", "f_type": "Area Type"
     }
 }
 
-# --- 4. DATA LISTER (GEOGRAFI & BRANCHER) ---
-GEOGRAPHY_RAW = {
+# --- 4. FASTLÅSTE DATA ---
+GEOGRAPHY = {
     "Andalusia": ["Estepona", "Marbella", "Benahavís", "San Pedro de Alcántara", "Nueva Andalucía", "Puerto Banús", "Casares", "Manilva", "Sotogrande", "Fuengirola", "Mijas", "Mijas Costa", "Benalmádena", "Torremolinos", "Málaga", "Rincón de la Victoria", "Torre del Mar", "Vélez-Málaga", "Nerja", "Frigiliana", "Granada", "Seville"],
     "Catalonia": ["Barcelona"], "Madrid": ["Madrid"], "Valencian Community": ["Alicante", "Torrevieja", "Valencia", "Benidorm", "Altea", "Calpe", "Denia", "Javea"],
     "Murcia": ["Murcia", "Cartagena"], "Balearic Islands": ["Palma de Mallorca", "Ibiza"], "Canary Islands": ["Tenerife", "Gran Canaria"]
 }
 
-INDUSTRIES_RAW = {
+INDUSTRIES = {
     "Ejendom": ["Køb bolig", "Sælge bolig", "Nybyggeri", "Investering", "Udlejning kort", "Udlejning lang"],
-    "Turisme & ferie": ["Hoteller", "Ferieboliger", "Resorts", "Fly & transport", "Oplevelser"],
+    "Turisme & ferie": ["Hoteller", "Ferieboliger", "Resorts", "Fly & transport", "Oplevelser & aktiviteter"],
     "Transport": ["Biludlejning", "Luksusbiler", "Lufthavn transfer", "Leasing"],
-    "Juridisk & rådgivning": ["Advokat", "Skatterådgivning", "NIE nummer", "Residency"],
+    "Juridisk & rådgivning": ["Advokat", "Skatterådgivning", "NIE nummer", "Residency / visa"],
     "Finans & bank": ["Boliglån", "Bank", "Valuta exchange", "Forsikring"],
     "Bolig & renovation": ["Byggefirma", "Renovering", "Interiør", "Møbler", "Pool / have"],
-    "Service & drift": ["Rengøring", "Property management", "Nøgleservice"],
-    "Sundhed & velvære": ["Hospital", "Læge", "Tandlæge", "Wellness"],
+    "Service & drift": ["Rengøring", "Property management", "Nøgleservice", "Udlejning management"],
+    "Sundhed & velvære": ["Hospital", "Læge", "Tandlæge", "Wellness / spa"],
     "Uddannelse": ["Internationale skoler", "Sprogskoler"],
     "Lifestyle": ["Restauranter", "Golf", "Fitness", "Beach clubs"],
     "Hverdagsliv": ["Supermarked", "Internet / telecom", "El / vand"],
     "Flytning & relocation": ["Flyttefirma", "Import af bil", "Pet relocation"]
 }
 
-# --- 5. LOGIK MOTOR ---
-def get_safe_date(val):
-    if not val or str(val).lower() in ['nat', 'nan', 'none', '', '00:00:00']: return date.today()
-    try: return pd.to_datetime(val, dayfirst=True, errors='coerce').date() or date.today()
-    except: return date.today()
+# --- 5. LOGIN ---
+if "authenticated" not in st.session_state: st.session_state.authenticated = False
+if "lang_choice" not in st.session_state: st.session_state.lang_choice = "🇩🇰 Dansk"
 
+def check_login():
+    u, p = st.session_state.get("l_u"), st.session_state.get("l_p")
+    if u == "admin" and p == os.getenv("APP_PASSWORD", "mgm2024"):
+        st.session_state.authenticated, st.session_state.user_role, st.session_state.username = True, "admin", u
+    elif db_engine:
+        with db_engine.connect() as conn:
+            res = conn.execute(text("SELECT password, role FROM users WHERE username = :u"), {"u": u}).fetchone()
+            if res and res[0] == p:
+                st.session_state.authenticated, st.session_state.user_role, st.session_state.username = True, res[1], u
+                st.rerun()
+
+if not st.session_state.authenticated:
+    st.session_state.lang_choice = st.selectbox("🌐 Choose Language", list(TRANSLATIONS.keys()))
+    L_log = TRANSLATIONS[st.session_state.lang_choice]
+    st.title(L_log['login_title'])
+    _, col, _ = st.columns([1, 1, 1])
+    with col:
+        st.text_input("User", key="l_u")
+        st.text_input("Pass", type="password", key="l_p")
+        st.button(L_log['login_btn'], type="primary", use_container_width=True, on_click=check_login)
+    st.stop()
+
+L = TRANSLATIONS[st.session_state.lang_choice]
+
+# --- 6. MASTER DATA FUNKTIONER ---
 MASTER_COLS = [
     'Client ID', 'Date created', 'Company Name', 'CIF Number VAT', 'Brancher', 'Underbrancher', 'Område Type', 'Region', 'Area', 'Town', 
     'Postal Code', 'Address', 'Exact Location', 'Kontaktperson', 'Titel', 'Email', 
@@ -119,28 +142,28 @@ DISPLAY_COLS = ['Client ID', 'Date created', 'Company Name', 'Brancher', 'Town',
 
 def load_options():
     opts = {
-        "agents": ["Brian", "Olga"], "status": ["Ny", "Dialog", "Vundet", "Tabt", "Opfølgning", "Pause"], 
+        "agents": ["Brian", "Olga"], "status": ["Ny", "Dialog", "Vundet", "Tabt", "Opfølgning"], 
         "membership": ["BASIC", "VIP", "Premium", "Gold"], 
         "advertising": ["Standard", "Medium", "Proff.", "SoMe", "FB", "Google", "Website", "Webshop", "Landingpage"],
-        "lead_types": ["Inbound", "AI Scan", "Andet"], "titles": ["CEO", "Ejer", "Manager", "Marketingchef"], 
-        "sprog": ["Dansk", "Engelsk", "Spansk", "Svensk", "Norsk", "Tysk"],
+        "leadtype": ["Inbound", "AI Scan", "Andet"], "titles": ["CEO", "Ejer", "Manager"],
+        "sprog": ["Dansk", "Engelsk", "Spansk", "Svensk"],
+        "regions": sorted(list(GEOGRAPHY.keys())),
+        "towns": sorted([t for sub in GEOGRAPHY.values() for t in sub]),
         "area_types": ["coast", "island", "inland", "city_area"],
-        "regions": sorted(list(GEOGRAPHY_RAW.keys())),
-        "towns": sorted([t for sub in GEOGRAPHY_RAW.values() for t in sub]),
-        "brancher": sorted(list(INDUSTRIES_RAW.keys())),
-        "underbrancher": sorted([u for sub in INDUSTRIES_RAW.values() for u in sub])
+        "brancher": sorted(list(INDUSTRIES.keys())),
+        "underbrancher": sorted([u for sub in INDUSTRIES.values() for u in sub])
     }
-    custom_opts = {k: [] for k in opts.keys()}
+    custom_vals = {k: [] for k in opts.keys()}
     if db_engine:
         try:
             df_opt = pd.read_sql("SELECT * FROM crm_configs", db_engine)
             for k in opts.keys():
                 stored = df_opt[df_opt['type'] == k]['value'].tolist()
                 if stored:
-                    custom_opts[k] = stored
+                    custom_vals[k] = stored
                     opts[k] = sorted(list(set(opts[k] + stored)))
         except: pass
-    return opts, custom_opts
+    return opts, custom_vals
 
 def force_clean(df):
     if df.empty: return pd.DataFrame(columns=MASTER_COLS)
@@ -161,48 +184,32 @@ def save_db(df):
         return True
     return False
 
-# --- 6. LOGIN ---
-if "authenticated" not in st.session_state: st.session_state.authenticated = False
-if "lang_choice" not in st.session_state: st.session_state.lang_choice = "🇩🇰 Dansk"
+# AI SCANNER GPT-4o
+def analyze_image_ai(image_bytes):
+    b64 = base64.b64encode(image_bytes).decode('utf-8')
+    try:
+        res = openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": [
+                {"type": "text", "text": "Extract: Company Name, CIF Number VAT, Kontaktperson, Email, Phone number, Website, Town, Address in JSON."},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
+            ]}], response_format={ "type": "json_object" }
+        )
+        return json.loads(res.choices[0].message.content)
+    except: return {}
 
-def check_login():
-    u, p = st.session_state.get("l_u"), st.session_state.get("l_p")
-    if u == "admin" and p == os.getenv("APP_PASSWORD", "mgm2024"):
-        st.session_state.authenticated, st.session_state.user_role, st.session_state.username = True, "admin", u
-    elif db_engine:
-        with db_engine.connect() as conn:
-            res = conn.execute(text("SELECT password, role FROM users WHERE username = :u"), {"u": u}).fetchone()
-            if res and res[0] == p:
-                st.session_state.authenticated, st.session_state.user_role, st.session_state.username = True, res[1], u
-                st.rerun()
-
-if not st.session_state.authenticated:
-    st.session_state.lang_choice = st.selectbox("🌐 Language", list(TRANSLATIONS.keys()))
-    L_log = TRANSLATIONS[st.session_state.lang_choice]
-    st.title(L_log['login_title'])
-    _, col, _ = st.columns([1, 1, 1])
-    with col:
-        st.text_input("User", key="l_u")
-        st.text_input("Pass", type="password", key="l_p")
-        st.button(L_log['login_btn'], type="primary", use_container_width=True, on_click=check_login)
-    st.stop()
-
-L = TRANSLATIONS[st.session_state.lang_choice]
-
-# Data load
 if 'df_leads' not in st.session_state:
     try: st.session_state.df_leads = force_clean(pd.read_sql("SELECT * FROM merchants_playground", db_engine))
     except: st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS)
 opts, custom_opts = load_options()
 
-# --- 7. POPUP KORT (DE 5 FANER - KOMPLET) ---
-@st.dialog("🎯 Client Card", width="large")
+# --- 7. KLIENT KORT POPUP (ALT ER MED) ---
+@st.dialog("🎯 CRM", width="large")
 def lead_popup(idx):
     row = st.session_state.df_leads.loc[idx].to_dict()
-    st.title(f"ID: {row.get('Client ID')} | {row.get('Company Name') or 'Lead'}")
+    st.title(f"🏢 {row.get('Company Name') or 'Lead'}")
     t1, t2, t3, t4, t5 = st.tabs([L['tab1'], L['tab2'], L['tab3'], L['tab4'], L['tab5']])
     upd = {}
-    
     with t1:
         st.markdown(f"##### {L['tab1']}")
         ct1, ct2 = st.columns(2)
@@ -217,102 +224,92 @@ def lead_popup(idx):
         with col2:
             for f, lab in [('WhatsApp', 'f_wa'), ('Telegram', 'f_tg'), ('Facebook', 'f_fb'), ('Instagram', 'f_ig'), ('Website', 'f_web')]:
                 upd[f] = st.text_input(L[lab], value=row.get(f,''), key=f"f1b_{f}_{idx}")
-
     with t2:
         st.markdown(f"##### {L['tab2']}")
         c1, c2 = st.columns(2)
         with c1:
-            upd['Område Type'] = c1.selectbox(L['f_type'], opts['area_types'], index=opts['area_types'].index(row['Område Type']) if row['Område Type'] in opts['area_types'] else 0)
-            upd['Region'] = c1.selectbox(L['f_reg'], opts['regions'], index=opts['regions'].index(row['Region']) if row['Region'] in opts['regions'] else 0)
-            upd['Town'] = c1.selectbox(L['f_town'], opts['towns'], index=opts['towns'].index(row['Town']) if row['Town'] in opts['towns'] else 0)
+            upd['Region'] = st.selectbox(L['f_reg'], opts['regions'], index=opts['regions'].index(row['Region']) if row['Region'] in opts['regions'] else 0)
+            upd['Town'] = st.selectbox(L['f_town'], opts['towns'], index=opts['towns'].index(row['Town']) if row['Town'] in opts['towns'] else 0)
+            upd['Område Type'] = st.selectbox(L['f_type'], opts['area_types'], index=opts['area_types'].index(row['Område Type']) if row['Område Type'] in opts['area_types'] else 0)
             for f, lab in [('Area', 'f_area'), ('Address', 'f_addr'), ('Postal Code', 'f_zip')]:
                 upd[f] = c1.text_input(L[lab], value=row.get(f,''), key=f"f2_{f}_{idx}")
         with c2:
-            upd['Brancher'] = c2.selectbox(L['f_br'], opts['brancher'], index=opts['brancher'].index(row['Brancher']) if row['Brancher'] in opts['brancher'] else 0)
+            upd['Brancher'] = st.selectbox(L['f_br'], opts['brancher'], index=opts['brancher'].index(row['Brancher']) if row['Brancher'] in opts['brancher'] else 0)
+            sub_l = INDUSTRIES.get(upd['Brancher'], opts['underbrancher'])
             curr_ubr = [x.strip() for x in str(row.get('Underbrancher')).split(',')] if row.get('Underbrancher') else []
-            upd['Underbrancher'] = ", ".join(c2.multiselect(L['f_ubr'], opts['underbrancher'], default=[x for x in curr_ubr if x in opts['underbrancher']]))
+            upd['Underbrancher'] = ", ".join(st.multiselect(L['f_ubr'], sub_l, default=[x for x in curr_ubr if x in sub_l]))
             curr_l = [x.strip() for x in str(row.get('Languages')).split(',')] if row.get('Languages') else []
-            upd['Languages'] = ", ".join(c2.multiselect(L['f_lang'], opts['sprog'], default=[x for x in curr_l if x in opts['sprog']]))
-            upd['Work time'] = c2.text_input(L['f_work'], value=row.get('Work time'), key=f"f2w_{idx}")
-
+            upd['Languages'] = ", ".join(st.multiselect(L['f_lang'], opts['sprog'], default=[x for x in curr_l if x in opts['sprog']]))
+            upd['Work time'] = c2.text_input(L['f_work'], value=row.get('Work time'), key=f"w_{idx}")
     with t3:
         st.markdown(f"##### {L['tab3']}")
         c1, c2 = st.columns(2)
         with c1:
-            upd['Status on lead'] = st.selectbox(L['f_st'], opts['status'], index=opts['status'].index(row['Status on lead']) if row['Status on lead'] in opts['status'] else 0)
-            upd['Membership'] = st.selectbox(L['f_mem'], opts['membership'], index=opts['membership'].index(row['Membership']) if row['Membership'] in opts['membership'] else 0)
-            upd['Advertising'] = st.selectbox(L['f_adv'], opts['advertising'], index=opts['advertising'].index(row['Advertising']) if row['Advertising'] in opts['advertising'] else 0)
+            upd['Status on lead'] = st.selectbox(L['f_st'], opts['status'], index=opts['status'].index(row.get('Status on lead')) if row.get('Status on lead') in opts['status'] else 0)
+            upd['Membership'] = st.selectbox(L['f_mem'], opts['membership'], index=opts['membership'].index(row.get('Membership')) if row.get('Membership') in opts['membership'] else 0)
+            upd['Advertising'] = st.selectbox(L['f_adv'], opts['advertising'], index=opts['advertising'].index(row.get('Advertising')) if row.get('Advertising') in opts['advertising'] else 0)
             upd['Tracking_URL'] = st.text_input(L['f_qr'], value=row.get('Tracking_URL'))
         with c2:
-            upd['Agent'] = st.selectbox(L['f_agent'], opts['agents'], index=opts['agents'].index(row['Agent']) if row['Agent'] in opts['agents'] else 0)
-            upd['Leadtype'] = st.selectbox(L['f_src'], opts['kilde'], index=opts['kilde'].index(row['Leadtype']) if row['Leadtype'] in opts['kilde'] else 0)
+            upd['Agent'] = st.selectbox(L['f_agent'], opts['agents'], index=opts['agents'].index(row.get('Agent')) if row.get('Agent') in opts['agents'] else 0)
+            upd['Leadtype'] = st.selectbox(L['f_src'], opts['leadtype'], index=opts['leadtype'].index(row.get('Leadtype')) if row.get('Leadtype') in opts['leadtype'] else 0)
             for f, lab in [('Date created','f_created'), ('Date for follow up','f_follow'), ('Kontakt dato','f_last')]:
                 d_v = date.today() if not row.get(f) else pd.to_datetime(row.get(f), dayfirst=True, errors='coerce').date() or date.today()
-                upd[f] = st.date_input(L[lab], value=d_v, key=f"f3d_{f}_{idx}").strftime('%d/%m/%Y')
-    
+                upd[f] = st.date_input(L[lab], value=d_v, key=f"d_{f}_{idx}").strftime('%d/%m/%Y')
     with t4:
-        st.markdown(f"##### {L['tab4']}")
         upd['Business Description'] = st.text_area(L['f_pitch'], value=row.get('Business Description'), height=100)
         upd['Description'] = st.text_area(L['f_desc'], value=row.get('Description'), height=250)
-
     with t5:
-        st.markdown(f"##### {L['tab5']}")
         upd['Noter'] = st.text_area(L['f_notes'], value=row.get('Noter'), height=200)
         c1, c2 = st.columns(2)
         if l_up := c1.file_uploader(L['field_logo'], type=['png','jpg'], key=f"lu_{idx}"):
             upd['Logo_Data'] = base64.b64encode(l_up.read()).decode()
         if f_up := c2.file_uploader(L['field_docs'], key=f"fu_{idx}"):
             upd['Fil_Navn'], upd['Fil_Data'] = f_up.name, base64.b64encode(f_up.read()).decode()
-        st.file_uploader(L['field_gal'], accept_multiple_files=True, key=f"ga_{idx}")
 
     if st.button(L['btn_save'], type="primary", use_container_width=True):
         for k,v in upd.items(): st.session_state.df_leads.at[idx, k] = v
         if save_db(st.session_state.df_leads): st.rerun()
-    if st.session_state.user_role == "admin" and st.button(L['btn_delete']):
+    if st.session_state.user_role == "admin" and st.button(L['btn_delete'], type="secondary", use_container_width=True):
         st.session_state.df_leads = st.session_state.df_leads.drop(idx)
         save_db(st.session_state.df_leads); st.rerun()
 
-# --- 9. SIDEBAR (ADMIN & FILTRE) ---
+# --- 8. SIDEBAR ---
 with st.sidebar:
-    st.session_state.lang = st.selectbox("🌐 Sprog", list(TRANSLATIONS.keys()))
+    st.session_state.lang_choice = st.selectbox("🌐 Sprog", list(TRANSLATIONS.keys()))
     st.header(f"👤 {st.session_state.username}")
     
-    # AI SCANNER
     with st.expander(L['sidebar_scan']):
-        cam = st.camera_input("Scan")
+        cam = st.camera_input("Scan Card")
         if cam:
-            nr = {c: "" for c in MASTER_COLS}; nr['Company Name'] = f"AI Scan {datetime.now().strftime('%H:%M')}"
-            nr['Date created'] = date.today().strftime('%d/%m/%Y')
-            nums = pd.to_numeric(st.session_state.df_leads['Client ID'], errors='coerce').dropna()
-            nr['Client ID'] = int(nums.max() + 1) if not nums.empty else 1001
-            st.session_state.df_leads = pd.concat([st.session_state.df_leads, pd.DataFrame([nr])], ignore_index=True)
-            save_db(st.session_state.df_leads); st.rerun()
+            with st.spinner("AI scan..."):
+                ai_d = analyze_image_ai(cam.read())
+                nr = {c: "" for c in MASTER_COLS}; nr.update(ai_d)
+                nr['Date created'] = date.today().strftime('%d/%m/%Y')
+                nums = pd.to_numeric(st.session_state.df_leads['Client ID'], errors='coerce').dropna()
+                nr['Client ID'] = int(nums.max() + 1) if not nums.empty else 1001
+                st.session_state.df_leads = pd.concat([st.session_state.df_leads, pd.DataFrame([nr])], ignore_index=True)
+                save_db(st.session_state.df_leads); st.rerun()
 
-    # ADMIN KONTROL (SEPARATE FELTER TIL ALT)
     if st.session_state.user_role == "admin":
         with st.expander(L['sidebar_admin']):
-            # BRUGERSTYRING
-            st.markdown("##### 👤 Agenter")
-            nu, np = st.text_input("Navn"), st.text_input("Pass", type="password")
+            st.markdown("##### Opret Agent")
+            nu, np = st.text_input("Navn"), st.text_input("Kode", type="password")
             if st.button("Opret Agent"):
-                db_execute("INSERT INTO users VALUES (:u,:p,'agent')", {"u":nu, "p":np}); st.rerun()
+                with db_engine.begin() as conn: conn.execute(text("INSERT INTO users VALUES (:u,:p,'agent')"), {"u":nu,"p":np})
+                st.success("OK")
             st.divider()
-            # LISTE STYRING
-            for label, key in [("Status", "status"), ("Medlem", "membership"), ("Annonce", "advertising"), ("Kilde", "kilde"), ("Sprog", "sprog"), ("Type", "area_types"), ("Region", "regions"), ("By", "towns"), ("Branche", "brancher"), ("Underbranche", "underbrancher")]:
-                st.markdown(f"**{label}**")
-                v_new = st.text_input(f"Ny {label}:", key=f"add_{key}")
-                if st.button(f"Tilføj", key=f"btn_a_{key}"):
-                    db_execute("INSERT INTO crm_configs (type, value) VALUES (:t,:v)", {"t":key, "v":v_new}); st.rerun()
-                if opts[key]:
-                    v_del = st.selectbox(f"Slet fra {label}:", ["Vælg..."] + opts[key], key=f"del_{key}")
-                    if v_del != "Vælg..." and st.button(f"Slet", key=f"btn_d_{key}"):
-                        db_execute("DELETE FROM crm_configs WHERE type=:t AND value=:v", {"t":key, "v":v_del}); st.rerun()
-            st.divider()
-            if st.button("🚨 Nulstil DB"):
-                with db_engine.begin() as conn: conn.execute(text("DROP TABLE IF EXISTS merchants_playground"))
-                st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS); st.rerun()
+            cat_list = ["agents", "status", "membership", "advertising", "leadtype", "titles", "sprog", "regions", "towns", "brancher", "underbrancher", "area_types"]
+            cat_ed = st.selectbox("Rediger liste:", cat_list)
+            v_new = st.text_input("Ny værdi:")
+            if st.button("💾 Add"):
+                with db_engine.begin() as conn: conn.execute(text("INSERT INTO crm_configs (type, value) VALUES (:t,:v)"), {"t":cat_ed, "v":v_new})
+                st.rerun()
+            if custom_opts[cat_ed]:
+                v_del = st.selectbox("Slet:", ["Vælg..."] + custom_opts[cat_ed])
+                if v_del != "Vælg..." and st.button("🗑️ Slet"):
+                    with db_engine.begin() as conn: conn.execute(text("DELETE FROM crm_configs WHERE type=:t AND value=:v"), {"t":cat_ed, "v":v_del})
+                    st.rerun()
 
-    # FILTRE
     st.header(L['sidebar_filter'])
     f_st = st.multiselect(L['f_st'], opts['status'])
     f_br = st.multiselect(L['f_br'], opts['brancher'])
@@ -321,14 +318,13 @@ with st.sidebar:
     st.divider()
     if st.button(L['btn_create'], type="primary", use_container_width=True):
         nums = pd.to_numeric(st.session_state.df_leads['Client ID'], errors='coerce').dropna()
-        nid = int(nums.max() + 1) if not nums.empty else 1001
-        nr = {c: "" for c in MASTER_COLS}; nr['Date created'] = date.today().strftime('%d/%m/%Y'); nr['Client ID'] = nid
+        nr = {c: "" for c in MASTER_COLS}; nr['Date created'] = date.today().strftime('%d/%m/%Y'); nr['Client ID'] = int(nums.max()+1) if not nums.empty else 1001
         st.session_state.df_leads = pd.concat([st.session_state.df_leads, pd.DataFrame([nr])], ignore_index=True)
         save_db(st.session_state.df_leads); st.rerun()
-    st.download_button("📥 Export", st.session_state.df_leads.to_csv(index=False), "master.csv", use_container_width=True)
+    st.download_button(L['sidebar_export'], st.session_state.df_leads.to_csv(index=False), "master.csv", use_container_width=True)
     if st.button(L['logout']): st.session_state.authenticated = False; st.rerun()
 
-# --- 10. DASHBOARD ---
+# --- 9. DASHBOARD ---
 st.title(L['title'])
 search = st.text_input(L['search'])
 df_v = st.session_state.df_leads.copy()
@@ -339,8 +335,8 @@ if f_re: df_v = df_v[df_v['Region'].isin(f_re)]
 if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
 
 st.write(L['total_leads'].format(n=len(df_v)))
+# VIKTIGT: Tabel med Auto-open ved klik
 sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="single-row", on_select="rerun", height=600)
-
 if sel.selection.rows:
     real_idx = df_v.index[sel.selection.rows[0]]
     lead_popup(real_idx)
