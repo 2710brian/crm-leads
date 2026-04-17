@@ -318,9 +318,9 @@ with st.sidebar:
         new_df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
         st.session_state.df_leads = pd.concat([st.session_state.df_leads, force_clean(new_df)], ignore_index=True)
         save_db(st.session_state.df_leads); st.rerun()
-        
+    
     st.download_button(L['sidebar_master'], pd.DataFrame(columns=MASTER_COLS).to_csv(index=False), "master_skabelon.csv", use_container_width=True)
-
+    
     # AI SCANNER
     with st.expander(L['sidebar_scan']):
         cam = st.camera_input("Scan Card")
@@ -349,8 +349,8 @@ with st.sidebar:
             if st.button("💾 Add"):
                 with db_engine.begin() as conn: conn.execute(text("INSERT INTO crm_configs (type, value) VALUES (:t,:v)"), {"t":cat_ed, "v":v_new})
                 st.rerun()
-            # Rettelse: Viser nu værdier fra den valgte kategori
-            v_del = st.selectbox("Slet fra database:", ["Vælg..."] + opts[cat_ed])
+            options_to_show = opts[cat_ed]
+            v_del = st.selectbox("Slet fra database:", ["Vælg..."] + options_to_show)
             if v_del != "Vælg..." and st.button("🗑️ Slet"):
                 with db_engine.begin() as conn: conn.execute(text("DELETE FROM crm_configs WHERE type=:t AND value=:v"), {"t":cat_ed, "v":v_del})
                 st.rerun()
@@ -384,22 +384,22 @@ if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, c
 st.write(L['total_leads'].format(n=len(df_v)))
 
 # Knapper
-col_k1, col_k2, _ = st.columns([0.5, 0.5, 9])
+c_btn1, c_btn2, _ = st.columns([0.5, 0.5, 9])
 sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="multi-row", key="table")
 
-# Rettelse: Håndter selektion uden AttributeError ved at kalde .selection() som funktion
-sel_selection = sel.selection
-selected_rows = sel_selection() if callable(sel_selection) else sel_selection.rows
+# RETTELSE: Adgang til rows på den korrekte måde (som en dict)
+selected_rows = sel.selection['rows']
 
-if col_k1.button("🗑️"):
+if c_btn1.button("🗑️"):
     if selected_rows:
         indices = df_v.iloc[selected_rows].index
         st.session_state.df_leads = st.session_state.df_leads.drop(indices)
         save_db(st.session_state.df_leads); st.rerun()
 
-if col_k2.button("📥") and selected_rows:
-    csv = df_v.iloc[selected_rows].to_csv(index=False).encode('utf-8')
-    st.download_button("Hent", csv, "valgte_leads.csv")
+if c_btn2.button("📥"):
+    if selected_rows:
+        csv = df_v.iloc[selected_rows].to_csv(index=False).encode('utf-8')
+        st.download_button("Hent", csv, "valgte_leads.csv")
 
 # Åbn popup ved enkelt-klik
 if len(selected_rows) == 1:
