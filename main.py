@@ -173,6 +173,7 @@ if not st.session_state.authenticated:
 
 L = TRANSLATIONS[st.session_state.lang_choice]
 
+# Data
 if 'df_leads' not in st.session_state:
     try: st.session_state.df_leads = force_clean(pd.read_sql("SELECT * FROM merchants_playground", db_engine))
     except: st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS)
@@ -208,15 +209,18 @@ opts, custom_opts = load_options()
 @st.dialog("🎯 Client Card", width="large")
 def lead_popup(idx):
     row = st.session_state.df_leads.loc[idx].to_dict()
+    
     col_l1, col_l2 = st.columns([0.8, 0.2])
     with col_l1: 
         upd_id = st.text_input(L['f_id'], value=row.get('Client ID', ''))
         st.title(f"ID: {upd_id} | {row.get('Company Name') or 'Lead'}")
     with col_l2: 
         if row.get('Logo_Data'): st.image(f"data:image/png;base64,{row['Logo_Data']}", width=100)
+
     st.divider()
     t1, t2, t3, t4, t5 = st.tabs([L['tab1'], L['tab2'], L['tab3'], L['tab4'], L['tab5']])
     upd = {'Client ID': upd_id}
+    
     with t1:
         st.markdown(f"##### {L['tab1']}")
         ct1, ct2 = st.columns(2)
@@ -231,6 +235,7 @@ def lead_popup(idx):
         with col2:
             for f, lab in [('WhatsApp', 'f_wa'), ('Telegram', 'f_tg'), ('Facebook', 'f_fb'), ('Instagram', 'f_ig'), ('Website', 'f_web')]:
                 upd[f] = st.text_input(L[lab], value=row.get(f,''), key=f"f1b_{f}_{idx}")
+    
     with t2:
         st.markdown(f"##### {L['tab2']}")
         c1, c2 = st.columns(2)
@@ -247,6 +252,7 @@ def lead_popup(idx):
             curr_l = [x.strip() for x in str(row.get('Languages')).split(',')] if row.get('Languages') else []
             upd['Languages'] = ", ".join(c2.multiselect(L['f_lang'], opts['sprog'], default=[x for x in curr_l if x in opts['sprog']]))
             upd['Work time'] = c2.text_input(L['f_work'], value=row.get('Work time'), key=f"f2w_{idx}")
+    
     with t3:
         st.markdown(f"##### {L['tab3']}")
         c1, c2 = st.columns(2)
@@ -261,13 +267,41 @@ def lead_popup(idx):
             for f, lab in [('Date created','f_created'), ('Date for follow up','f_follow'), ('Kontakt dato','f_last')]:
                 d_v = date.today() if not row.get(f) else pd.to_datetime(row.get(f), dayfirst=True, errors='coerce').date() or date.today()
                 upd[f] = st.date_input(L[lab], value=d_v, key=f"f3d_{f}_{idx}").strftime('%d/%m/%Y')
+    
     with t4:
         st.markdown(f"##### {L['tab4']}")
         upd['Business Description'] = st.text_area(L['f_pitch'], value=row.get('Business Description'), height=100)
         upd['Description'] = st.text_area(L['f_desc'], value=row.get('Description'), height=250)
+
     with t5:
         st.markdown(f"##### {L['tab5']}")
         upd['Noter'] = st.text_area(L['f_notes'], value=row.get('Noter'), height=150)
+        st.divider()
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            st.markdown(f"##### {L['field_logo']}")
+            if row.get('Logo_Data'): st.image(f"data:image/png;base64,{row['Logo_Data']}", width=150)
+            l_up = st.file_uploader(L['field_logo'], type=['png','jpg'], key=f"lu_{idx}")
+            if l_up: upd['Logo_Data'] = base64.b64encode(l_up.read()).decode()
+        with col_m2:
+            st.markdown(f"##### {L['field_docs']}")
+            if row.get('Fil_Data'):
+                st.markdown(f"📄 **{row['Fil_Navn']}**")
+                st.markdown(f'<a href="data:application/octet-stream;base64,{row["Fil_Data"]}" download="{row["Fil_Navn"]}">👉 Hent fil</a>', unsafe_allow_html=True)
+            f_up = st.file_uploader(L['field_docs'], key=f"fu_{idx}")
+            if f_up: upd['Fil_Navn'], upd['Fil_Data'] = f_up.name, base64.b64encode(f_up.read()).decode()
+        st.divider()
+        st.markdown(f"##### {L['field_gal']}")
+        gal_up = st.file_uploader("Upload Galleri", accept_multiple_files=True, key=f"ga_{idx}")
+        if gal_up:
+            gal_list = []
+            for f in gal_up: gal_list.append(base64.b64encode(f.read()).decode())
+            upd['Gallery_Data'] = json.dumps(gal_list)
+        if row.get('Gallery_Data'):
+            imgs = json.loads(row['Gallery_Data'])
+            g_cols = st.columns(3)
+            for i, img in enumerate(imgs): g_cols[i % 3].image(f"data:image/png;base64,{img}", use_container_width=True)
+
     if st.button(L['btn_save'], type="primary", use_container_width=True):
         for k,v in upd.items(): st.session_state.df_leads.at[idx, k] = v
         if save_db(st.session_state.df_leads): st.rerun()
@@ -279,12 +313,17 @@ def lead_popup(idx):
 with st.sidebar:
     st.session_state.lang_choice = st.selectbox("🌐 Choose Language", list(TRANSLATIONS.keys()))
     st.header(f"👤 {st.session_state.username}")
+    
+    # Import
     uploaded_file = st.file_uploader(L['sidebar_import'], type=['csv', 'xlsx'])
     if uploaded_file:
         new_df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
         st.session_state.df_leads = pd.concat([st.session_state.df_leads, force_clean(new_df)], ignore_index=True)
         save_db(st.session_state.df_leads); st.rerun()
+    
     st.download_button(L['sidebar_master'], pd.DataFrame(columns=MASTER_COLS).to_csv(index=False), "master_skabelon.csv", use_container_width=True)
+    
+    # AI SCANNER
     with st.expander(L['sidebar_scan']):
         cam = st.camera_input("Scan Card")
         if cam:
@@ -296,6 +335,8 @@ with st.sidebar:
                 nr['Client ID'] = int(nums.max() + 1) if not nums.empty else 1001
                 st.session_state.df_leads = pd.concat([st.session_state.df_leads, pd.DataFrame([nr])], ignore_index=True)
                 save_db(st.session_state.df_leads); st.rerun()
+
+    # ADMIN
     if st.session_state.user_role == "admin":
         with st.expander(L['sidebar_admin']):
             st.markdown("##### 👤 Agenter")
@@ -310,17 +351,21 @@ with st.sidebar:
             if st.button("💾 Add"):
                 with db_engine.begin() as conn: conn.execute(text("INSERT INTO crm_configs (type, value) VALUES (:t,:v)"), {"t":cat_ed, "v":v_new})
                 st.rerun()
-            v_del = st.selectbox("Slet fra database:", ["Vælg..."] + opts[cat_ed])
+            # Rettelse: Viser nu værdier for den valgte kategori
+            options_to_show = opts[cat_ed]
+            v_del = st.selectbox("Slet fra database:", ["Vælg..."] + options_to_show)
             if v_del != "Vælg..." and st.button("🗑️ Slet"):
                 with db_engine.begin() as conn: conn.execute(text("DELETE FROM crm_configs WHERE type=:t AND value=:v"), {"t":cat_ed, "v":v_del})
                 st.rerun()
             if st.button("🚨 Reset Database"):
                 with db_engine.begin() as conn: conn.execute(text("DROP TABLE IF EXISTS merchants_playground"))
                 st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS); st.rerun()
+
     st.header(L['sidebar_filter'])
     f_st = st.multiselect(L['f_st'], opts['status'])
     f_br = st.multiselect(L['f_br'], opts['brancher'])
     f_re = st.multiselect(L['f_reg'], opts['regions'])
+
     st.divider()
     if st.button(L['btn_create'], type="primary", use_container_width=True):
         nums = pd.to_numeric(st.session_state.df_leads['Client ID'], errors='coerce').dropna()
@@ -341,23 +386,25 @@ if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, c
 
 st.write(L['total_leads'].format(n=len(df_v)))
 
-c1, c2, _ = st.columns([0.5, 0.5, 9])
-# key="leads_table" er vigtig for at tilgå data
-sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="multi-row", key="leads_table")
+# Knapper
+col_b1, col_b2, _ = st.columns([0.5, 0.5, 9])
+# Tabel
+sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="multi-row", key="table")
 
-if c1.button("🗑️"):
-    # Henter valgte rækker direkte fra session_state
-    if 'selection' in st.session_state.leads_table:
-        indices = st.session_state.leads_table['selection']['rows']
-        st.session_state.df_leads = st.session_state.df_leads.drop(df_v.iloc[indices].index)
+# Håndtering af selection
+if col_b1.button("🗑️"):
+    rows = sel.selection.rows if hasattr(sel.selection, 'rows') else []
+    if rows:
+        st.session_state.df_leads = st.session_state.df_leads.drop(df_v.iloc[rows].index)
         save_db(st.session_state.df_leads); st.rerun()
 
-if c2.button("📥"):
-    if 'selection' in st.session_state.leads_table:
-        indices = st.session_state.leads_table['selection']['rows']
-        csv = df_v.iloc[indices].to_csv(index=False).encode('utf-8')
+if col_b2.button("📥"):
+    rows = sel.selection.rows if hasattr(sel.selection, 'rows') else []
+    if rows:
+        csv = df_v.iloc[rows].to_csv(index=False).encode('utf-8')
         st.download_button("Hent", csv, "valgte.csv")
 
-if 'selection' in st.session_state.leads_table and len(st.session_state.leads_table['selection']['rows']) == 1:
-    idx = df_v.index[st.session_state.leads_table['selection']['rows'][0]]
-    lead_popup(idx)
+# Pop-up
+rows = sel.selection.rows if hasattr(sel.selection, 'rows') else []
+if len(rows) == 1:
+    lead_popup(df_v.index[rows[0]])
