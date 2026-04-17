@@ -272,6 +272,7 @@ def lead_popup(idx):
         upd['Description'] = st.text_area(L['f_desc'], value=row.get('Description'), height=250)
 
     with t5:
+        st.markdown(f"##### {L['tab5']}")
         upd['Noter'] = st.text_area(L['f_notes'], value=row.get('Noter'), height=150)
         st.divider()
         col_m1, col_m2 = st.columns(2)
@@ -317,7 +318,7 @@ with st.sidebar:
         new_df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
         st.session_state.df_leads = pd.concat([st.session_state.df_leads, force_clean(new_df)], ignore_index=True)
         save_db(st.session_state.df_leads); st.rerun()
-        
+    
     st.download_button(L['sidebar_master'], pd.DataFrame(columns=MASTER_COLS).to_csv(index=False), "master_skabelon.csv", use_container_width=True)
     
     # AI SCANNER
@@ -384,10 +385,11 @@ st.write(L['total_leads'].format(n=len(df_v)))
 
 # Knapper
 col_b1, col_b2, _ = st.columns([0.5, 0.5, 9])
+# Tabel med afkrydsning (hide_index fjerner 0-kolonnen)
 sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="multi-row", hide_index=True, key="table")
 
-# Håndtering af selection
-sel_rows = sel.selection.get('rows', [])
+# Hent selection sikkert
+sel_rows = sel.selection.rows
 
 if col_b1.button("🗑️") and sel_rows:
     indices = df_v.iloc[sel_rows].index
@@ -398,6 +400,6 @@ if col_b2.button("📥") and sel_rows:
     csv = df_v.iloc[sel_rows].to_csv(index=False).encode('utf-8')
     st.download_button("Hent", csv, "valgte_leads.csv")
 
-# Åbn popup ved klik
-if sel_rows and len(sel_rows) == 1:
+# Åbn popup ved klik på række (når kun 1 række er markeret)
+if len(sel_rows) == 1:
     lead_popup(df_v.index[sel_rows[0]])
