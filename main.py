@@ -208,11 +208,9 @@ opts, custom_opts = load_options()
 @st.dialog("🎯 Client Card", width="large")
 def lead_popup(idx):
     row = st.session_state.df_leads.loc[idx].to_dict()
-    
     col_l1, col_l2 = st.columns([0.8, 0.2])
-    with col_l1: 
-        upd_id = st.text_input(L['f_id'], value=row.get('Client ID', ''))
-        st.title(f"ID: {upd_id} | {row.get('Company Name') or 'Lead'}")
+    upd_id = st.text_input(L['f_id'], value=row.get('Client ID', ''))
+    with col_l1: st.title(f"ID: {upd_id} | {row.get('Company Name') or 'Lead'}")
     with col_l2: 
         if row.get('Logo_Data'): st.image(f"data:image/png;base64,{row['Logo_Data']}", width=100)
 
@@ -349,8 +347,8 @@ with st.sidebar:
             if st.button("💾 Add"):
                 with db_engine.begin() as conn: conn.execute(text("INSERT INTO crm_configs (type, value) VALUES (:t,:v)"), {"t":cat_ed, "v":v_new})
                 st.rerun()
-            options_to_show = opts[cat_ed]
-            v_del = st.selectbox("Slet fra database:", ["Vælg..."] + options_to_show)
+            # Rettelse: Viser nu værdier for den valgte kategori
+            v_del = st.selectbox("Slet fra database:", ["Vælg..."] + opts[cat_ed])
             if v_del != "Vælg..." and st.button("🗑️ Slet"):
                 with db_engine.begin() as conn: conn.execute(text("DELETE FROM crm_configs WHERE type=:t AND value=:v"), {"t":cat_ed, "v":v_del})
                 st.rerun()
@@ -384,23 +382,29 @@ if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, c
 st.write(L['total_leads'].format(n=len(df_v)))
 
 # Knapper
-c_btn1, c_btn2, _ = st.columns([0.5, 0.5, 9])
+col_k1, col_k2, _ = st.columns([0.5, 0.5, 9])
 sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="multi-row", key="table")
 
-# RETTELSE: Adgang til rows på den korrekte måde (som en dict)
-selected_rows = sel.selection['rows']
+# RETTELSE: Undgå fejl ved at tjekke hvad sel.selection returnerer
+# Vi prøver at få fat i de valgte rækker via sel.selection
+try:
+    # I nyere versioner er selection en egenskab der returnerer en dict-lignende struktur
+    # Vi prøver at tilgå det dynamisk uden at kalde det som en funktion
+    sel_rows = sel.selection['rows']
+except:
+    sel_rows = []
 
-if c_btn1.button("🗑️"):
-    if selected_rows:
-        indices = df_v.iloc[selected_rows].index
+if col_k1.button("🗑️"):
+    if sel_rows:
+        indices = df_v.iloc[sel_rows].index
         st.session_state.df_leads = st.session_state.df_leads.drop(indices)
         save_db(st.session_state.df_leads); st.rerun()
 
-if c_btn2.button("📥"):
-    if selected_rows:
-        csv = df_v.iloc[selected_rows].to_csv(index=False).encode('utf-8')
+if col_k2.button("📥"):
+    if sel_rows:
+        csv = df_v.iloc[sel_rows].to_csv(index=False).encode('utf-8')
         st.download_button("Hent", csv, "valgte_leads.csv")
 
 # Åbn popup ved enkelt-klik
-if len(selected_rows) == 1:
-    lead_popup(df_v.index[selected_rows[0]])
+if len(sel_rows) == 1:
+    lead_popup(df_v.index[sel_rows[0]])
