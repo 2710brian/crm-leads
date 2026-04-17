@@ -208,12 +208,11 @@ opts, custom_opts = load_options()
 @st.dialog("🎯 Client Card", width="large")
 def lead_popup(idx):
     row = st.session_state.df_leads.loc[idx].to_dict()
+    # RETTELSE: Redigerbart ID
+    upd_id = st.text_input(L['f_id'], value=row.get('Client ID', ''))
     
     col_l1, col_l2 = st.columns([0.8, 0.2])
-    with col_l1: 
-        # RETTELSE: Redigerbart ID felt
-        upd_id = st.text_input(L['f_id'], value=row.get('Client ID', ''))
-        st.title(f"ID: {upd_id} | {row.get('Company Name') or 'Lead'}")
+    with col_l1: st.title(f"ID: {upd_id} | {row.get('Company Name') or 'Lead'}")
     with col_l2: 
         if row.get('Logo_Data'): st.image(f"data:image/png;base64,{row['Logo_Data']}", width=100)
 
@@ -350,7 +349,7 @@ with st.sidebar:
             if st.button("💾 Add"):
                 with db_engine.begin() as conn: conn.execute(text("INSERT INTO crm_configs (type, value) VALUES (:t,:v)"), {"t":cat_ed, "v":v_new})
                 st.rerun()
-            # RETTELSE: Viser nu værdier fra den valgte kategori, ikke kun agenter
+            # RETTELSE: Vis alt indhold baseret på den valgte kategori
             options_to_show = opts[cat_ed]
             v_del = st.selectbox("Slet fra database:", ["Vælg..."] + options_to_show)
             if v_del != "Vælg..." and st.button("🗑️ Slet"):
@@ -385,25 +384,28 @@ if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, c
 
 st.write(L['total_leads'].format(n=len(df_v)))
 
-# RETTELSE: Multi-select tabel med slet/download knapper
-col_btns = st.columns([1, 1, 10])
-sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="multi-row", key="table_data")
+# Knapper til slet/download (yderst til højre)
+c_main, c_btns = st.columns([0.85, 0.15])
+with c_btns:
+    b_col1, b_col2 = st.columns(2)
+    slet_btn = b_col1.button("🗑️")
+    down_btn = b_col2.button("📥")
 
-# Håndtering af selection uden AttributeError
-selection_rows = sel.selection.get('rows', [])
+# Tabel (Multi-row selection)
+sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="multi-row", key="table")
 
-if col_btns[0].button("🗑️"):
-    if selection_rows:
-        indices_to_drop = df_v.iloc[selection_rows].index
-        st.session_state.df_leads = st.session_state.df_leads.drop(indices_to_drop)
-        save_db(st.session_state.df_leads); st.rerun()
+# RETTELSE: Brug .rows i stedet for .selection.get()
+rows = sel.selection.rows
 
-if selection_rows:
-    csv_data = df_v.iloc[selection_rows].to_csv(index=False).encode('utf-8')
-    col_btns[1].download_button("📥", csv_data, "valgte_leads.csv")
+if slet_btn and rows:
+    indices = df_v.iloc[rows].index
+    st.session_state.df_leads = st.session_state.df_leads.drop(indices)
+    save_db(st.session_state.df_leads); st.rerun()
 
-# Åbn popup KUN ved enkeltklik, uafhængigt af checkbox-markering
-# Bemærk: Vi tjekker her på det sidste række-valg
-if selection_rows and len(selection_rows) == 1:
-    real_idx = df_v.index[selection_rows[0]]
-    lead_popup(real_idx)
+if down_btn and rows:
+    csv = df_v.iloc[rows].to_csv(index=False).encode('utf-8')
+    st.download_button("Hent valgte som CSV", csv, "valgte_leads.csv")
+
+# Åbn popup ved enkelt-klik på række
+if len(rows) == 1:
+    lead_popup(df_v.index[rows[0]])
