@@ -388,38 +388,32 @@ st.write(L['total_leads'].format(n=len(df_v)))
 # Knapper
 col_b1, col_b2, _ = st.columns([0.5, 0.5, 9])
 
-# Tabel med afkrydsning (multi-row)
-sel = st.dataframe(
-    df_v[DISPLAY_COLS], 
-    use_container_width=True, 
-    selection_mode="multi-row", 
-    hide_index=True, 
-    key="table"
+# KLASSISK METODE: Vi tilføjer en 'Select' kolonne til visning
+df_display = df_v[DISPLAY_COLS].copy()
+df_display.insert(0, "Select", False)
+
+# Brug st.data_editor for at få afkrydsningsfelter der virker
+edited_df = st.data_editor(
+    df_display,
+    use_container_width=True,
+    hide_index=True,
+    column_config={"Select": st.column_config.CheckboxColumn(required=True)},
+    disabled=[c for c in DISPLAY_COLS],
+    key="data_editor"
 )
 
-# MEGET ROBUST HÅNDTERING AF SELECTION
-# Vi tjekker om 'sel.selection' er en funktion eller et objekt
-rows = []
-try:
-    if callable(sel.selection):
-        # Hvis det er en funktion, kalder vi den
-        rows = sel.selection().get('rows', [])
-    else:
-        # Hvis det er et objekt, bruger vi .get direkte
-        rows = sel.selection.get('rows', [])
-except:
-    # Hvis alt andet fejler, prøver vi session_state som backup
-    if 'table' in st.session_state and 'selection' in st.session_state.table:
-        rows = st.session_state.table['selection'].get('rows', [])
+# Find de valgte rækker
+selected_indices = edited_df.index[edited_df["Select"]].tolist()
 
-if col_b1.button("🗑️") and rows:
-    st.session_state.df_leads = st.session_state.df_leads.drop(df_v.iloc[rows].index)
+if col_b1.button("🗑️") and selected_indices:
+    # Vi bruger de rigtige index fra df_v
+    st.session_state.df_leads = st.session_state.df_leads.drop(df_v.iloc[selected_indices].index)
     save_db(st.session_state.df_leads); st.rerun()
 
-if col_b2.button("📥") and rows:
-    csv = df_v.iloc[rows].to_csv(index=False).encode('utf-8')
+if col_b2.button("📥") and selected_indices:
+    csv = df_v.iloc[selected_indices].to_csv(index=False).encode('utf-8')
     st.download_button("Hent", csv, "valgte.csv")
 
-# Åbn popup ved klik på række
-if len(rows) == 1:
-    lead_popup(df_v.index[rows[0]])
+# Åbn popup ved klik på række (hvis kun én er valgt)
+if len(selected_indices) == 1:
+    lead_popup(df_v.index[selected_indices[0]])
