@@ -385,35 +385,46 @@ if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, c
 
 st.write(L['total_leads'].format(n=len(df_v)))
 
-# Knapper
+# Knapper til bulk-handlinger
 col_b1, col_b2, _ = st.columns([0.5, 0.5, 9])
 
-# KLASSISK METODE: Vi tilføjer en 'Select' kolonne til visning
+# Forbered visning med en 'Select' kolonne og en 'Åbn' kolonne
 df_display = df_v[DISPLAY_COLS].copy()
 df_display.insert(0, "Select", False)
+df_display.insert(1, "Åbn", False) # Vi bruger en checkbox som en knap til at åbne kortet
 
-# Brug st.data_editor for at få afkrydsningsfelter der virker
+# Brug st.data_editor
 edited_df = st.data_editor(
     df_display,
     use_container_width=True,
     hide_index=True,
-    column_config={"Select": st.column_config.CheckboxColumn(required=True)},
+    column_config={
+        "Select": st.column_config.CheckboxColumn("Vælg", help="Vælg til bulk slet/download"),
+        "Åbn": st.column_config.CheckboxColumn("🔍", help="Klik her for at åbne lead-kortet")
+    },
     disabled=[c for c in DISPLAY_COLS],
-    key="data_editor"
+    key="data_editor_v4"
 )
 
-# Find de valgte rækker
-selected_indices = edited_df.index[edited_df["Select"]].tolist()
+# 1. Find rækker valgt til bulk-handlinger (Select)
+selected_bulk = edited_df.index[edited_df["Select"]].tolist()
 
-if col_b1.button("🗑️") and selected_indices:
-    # Vi bruger de rigtige index fra df_v
-    st.session_state.df_leads = st.session_state.df_leads.drop(df_v.iloc[selected_indices].index)
+# 2. Find rækken der skal åbnes (Åbn)
+open_request = edited_df.index[edited_df["Åbn"]].tolist()
+
+# Bulk Slet
+if col_b1.button("🗑️") and selected_bulk:
+    st.session_state.df_leads = st.session_state.df_leads.drop(df_v.iloc[selected_bulk].index)
     save_db(st.session_state.df_leads); st.rerun()
 
-if col_b2.button("📥") and selected_indices:
-    csv = df_v.iloc[selected_indices].to_csv(index=False).encode('utf-8')
-    st.download_button("Hent", csv, "valgte.csv")
+# Bulk Download (Rettet fix)
+if selected_bulk:
+    csv_data = df_v.iloc[selected_bulk].to_csv(index=False).encode('utf-8')
+    col_b2.download_button("📥", data=csv_data, file_name=f"valgte_leads_{date.today()}.csv", mime="text/csv")
+else:
+    col_b2.button("📥", disabled=True)
 
-# Åbn popup ved klik på række (hvis kun én er valgt)
-if len(selected_indices) == 1:
-    lead_popup(df_v.index[selected_indices[0]])
+# Åbn popup hvis 'Åbn' er markeret
+if open_request:
+    # Vi åbner kun den første hvis flere er markeret ved en fejl
+    lead_popup(df_v.index[open_request[0]])
