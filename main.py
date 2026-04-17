@@ -288,7 +288,7 @@ def lead_popup(idx):
     with t4:
         st.markdown(f"##### {L['tab4']}")
         upd['Business Description'] = st.text_area(L['f_pitch'], value=row.get('Business Description'), height=100)
-        upd['Description'] = st.text_area(L['f_desc'], value=row.get('Description'), height=250)
+        upd['Description'] = st.text_area(L['f_desc'], height=250, value=row.get('Description'))
 
     with t5:
         st.markdown(f"##### {L['tab5']}")
@@ -405,10 +405,10 @@ st.write(L['total_leads'].format(n=len(df_v)))
 # Knapper til bulk-handlinger
 col_b1, col_b2, _ = st.columns([0.5, 0.5, 9])
 
-# Forbered visning med en 'Select' kolonne og en 'Vis' kolonne
+# Forbered visning med en 'Select' kolonne og en 'VIS' kolonne
 df_display = df_v[DISPLAY_COLS].copy()
 df_display.insert(0, "Select", False)
-df_display.insert(1, "Vis", False) # Vi bruger en checkbox som en knap til at åbne kortet
+df_display.insert(1, "VIS", "👁️ VIS") # Vi bruger teksten "👁️ VIS" i stedet for en checkbox
 
 # Brug st.data_editor
 edited_df = st.data_editor(
@@ -417,17 +417,20 @@ edited_df = st.data_editor(
     hide_index=True,
     column_config={
         "Select": st.column_config.CheckboxColumn("Vælg", help="Vælg til bulk slet/download"),
-        "Vis": st.column_config.CheckboxColumn("👁️ Vis", help="Klik her for at åbne lead-kortet")
+        "VIS": st.column_config.TextColumn("👁️ VIS", help="Klik på teksten for at åbne lead-kortet", width="small")
     },
-    disabled=[c for c in DISPLAY_COLS],
-    key="data_editor_v5"
+    disabled=[c for c in DISPLAY_COLS] + ["VIS"], # Gør alle kolonner undtagen 'Select' skrivebeskyttede
+    key="data_editor_v6"
 )
 
 # 1. Find rækker valgt til bulk-handlinger (Select)
 selected_bulk = edited_df.index[edited_df["Select"]].tolist()
 
-# 2. Find rækken der skal åbnes (Vis)
-open_request = edited_df.index[edited_df["Vis"]].tolist()
+# 2. Find rækken der skal åbnes (Vi tjekker om brugeren har klikket på en række)
+# I Streamlit data_editor kan vi bruge 'selection' i session_state til at fange klik
+rows_clicked = []
+if 'data_editor_v6' in st.session_state and 'selection' in st.session_state.data_editor_v6:
+    rows_clicked = st.session_state.data_editor_v6['selection'].get('rows', [])
 
 # Bulk Slet
 if col_b1.button("🗑️") and selected_bulk:
@@ -441,7 +444,6 @@ if selected_bulk:
 else:
     col_b2.button("📥", disabled=True)
 
-# Åbn popup hvis 'Vis' er markeret
-if open_request:
-    # Vi åbner kun den første hvis flere er markeret ved en fejl
-    lead_popup(df_v.index[open_request[0]])
+# Åbn popup hvis en række er klikket på
+if rows_clicked:
+    lead_popup(df_v.index[rows_clicked[0]])
