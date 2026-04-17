@@ -173,6 +173,7 @@ if not st.session_state.authenticated:
 
 L = TRANSLATIONS[st.session_state.lang_choice]
 
+# Data
 if 'df_leads' not in st.session_state:
     try: st.session_state.df_leads = force_clean(pd.read_sql("SELECT * FROM merchants_playground", db_engine))
     except: st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS)
@@ -208,17 +209,18 @@ opts, custom_opts = load_options()
 @st.dialog("🎯 Client Card", width="large")
 def lead_popup(idx):
     row = st.session_state.df_leads.loc[idx].to_dict()
-    # RETTELSE: Redigerbart ID
-    upd_id = st.text_input(L['f_id'], value=row.get('Client ID', ''))
     
     col_l1, col_l2 = st.columns([0.8, 0.2])
-    with col_l1: st.title(f"ID: {upd_id} | {row.get('Company Name') or 'Lead'}")
+    # ID er nu redigerbart
+    with col_l1: 
+        new_id = st.text_input(L['f_id'], value=row.get('Client ID'))
+        st.title(f"ID: {new_id} | {row.get('Company Name') or 'Lead'}")
     with col_l2: 
         if row.get('Logo_Data'): st.image(f"data:image/png;base64,{row['Logo_Data']}", width=100)
 
     st.divider()
     t1, t2, t3, t4, t5 = st.tabs([L['tab1'], L['tab2'], L['tab3'], L['tab4'], L['tab5']])
-    upd = {'Client ID': upd_id}
+    upd = {'Client ID': new_id}
     
     with t1:
         st.markdown(f"##### {L['tab1']}")
@@ -312,15 +314,15 @@ with st.sidebar:
     st.session_state.lang_choice = st.selectbox("🌐 Choose Language", list(TRANSLATIONS.keys()))
     st.header(f"👤 {st.session_state.username}")
     
-    # RETTELSE: Import og Master skabelon
+    # Import
     uploaded_file = st.file_uploader(L['sidebar_import'], type=['csv', 'xlsx'])
     if uploaded_file:
         new_df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
         st.session_state.df_leads = pd.concat([st.session_state.df_leads, force_clean(new_df)], ignore_index=True)
         save_db(st.session_state.df_leads); st.rerun()
-    
+        
     st.download_button(L['sidebar_master'], pd.DataFrame(columns=MASTER_COLS).to_csv(index=False), "master_skabelon.csv", use_container_width=True)
-
+    
     # AI SCANNER
     with st.expander(L['sidebar_scan']):
         cam = st.camera_input("Scan Card")
@@ -349,9 +351,8 @@ with st.sidebar:
             if st.button("💾 Add"):
                 with db_engine.begin() as conn: conn.execute(text("INSERT INTO crm_configs (type, value) VALUES (:t,:v)"), {"t":cat_ed, "v":v_new})
                 st.rerun()
-            # RETTELSE: Vis alt indhold baseret på den valgte kategori
-            options_to_show = opts[cat_ed]
-            v_del = st.selectbox("Slet fra database:", ["Vælg..."] + options_to_show)
+            # Rettet: Viser nu værdier fra den valgte kategori
+            v_del = st.selectbox("Slet fra database:", ["Vælg..."] + opts[cat_ed])
             if v_del != "Vælg..." and st.button("🗑️ Slet"):
                 with db_engine.begin() as conn: conn.execute(text("DELETE FROM crm_configs WHERE type=:t AND value=:v"), {"t":cat_ed, "v":v_del})
                 st.rerun()
@@ -384,28 +385,26 @@ if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, c
 
 st.write(L['total_leads'].format(n=len(df_v)))
 
-# Knapper til slet/download (yderst til højre)
-c_main, c_btns = st.columns([0.85, 0.15])
-with c_btns:
-    b_col1, b_col2 = st.columns(2)
-    slet_btn = b_col1.button("🗑️")
-    down_btn = b_col2.button("📥")
+# Knapper
+col_k1, col_k2, _ = st.columns([1, 1, 8])
 
-# Tabel (Multi-row selection)
+# Tabel
 sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="multi-row", key="table")
 
-# RETTELSE: Brug .rows i stedet for .selection.get()
-rows = sel.selection.rows
+# Rettelse: Håndter selection korrekt uden .get()
+sel_rows = sel.selection.rows
 
-if slet_btn and rows:
-    indices = df_v.iloc[rows].index
-    st.session_state.df_leads = st.session_state.df_leads.drop(indices)
-    save_db(st.session_state.df_leads); st.rerun()
+if col_k1.button("🗑️"):
+    if sel_rows:
+        indices = df_v.iloc[sel_rows].index
+        st.session_state.df_leads = st.session_state.df_leads.drop(indices)
+        save_db(st.session_state.df_leads); st.rerun()
 
-if down_btn and rows:
-    csv = df_v.iloc[rows].to_csv(index=False).encode('utf-8')
-    st.download_button("Hent valgte som CSV", csv, "valgte_leads.csv")
+if col_k2.button("📥"):
+    if sel_rows:
+        csv = df_v.iloc[sel_rows].to_csv(index=False).encode('utf-8')
+        st.download_button("📥", csv, "valgte_leads.csv")
 
-# Åbn popup ved enkelt-klik på række
-if len(rows) == 1:
-    lead_popup(df_v.index[rows[0]])
+# Åbn popup ved enkelt-klik
+if len(sel_rows) == 1:
+    lead_popup(df_v.index[sel_rows[0]])
