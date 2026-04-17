@@ -44,8 +44,8 @@ TRANSLATIONS = {
         "title": "Business CRM Master AI", "login_title": "CRM Login", "login_btn": "LOG IND", "logout": "🚪 Log ud",
         "search": "🔍 Søg i alt data...", "total_leads": "Viste leads: {n}", "sidebar_scan": "📸 AI Card Scanner",
         "sidebar_filter": "🎯 Kampagne Filtre", "sidebar_admin": "🛠️ Admin Kontrol", "sidebar_user": "👤 Brugerstyring",
-        "sidebar_export": "📤 Eksport valgte", "sidebar_import": "📥 Import / Flet", "btn_create": "➕ OPRET MANUELT",
-        "btn_save": "💾 GEM ALT PÅ KLIENT", "btn_delete": "🗑️ SLET LEAD", "btn_delete_sel": "🗑️ SLET VALGTE",
+        "sidebar_export": "📤 Eksport", "sidebar_import": "📥 Import / Flet", "sidebar_master": "📄 Hent Master Skabelon", "btn_create": "➕ OPRET MANUELT",
+        "btn_save": "💾 GEM ALT PÅ KLIENT", "btn_delete": "🗑️ SLET LEAD",
         "tab1": "📞 Kontakt & Social", "tab2": "🌍 Geografi & Brancher", "tab3": "⚙️ Salg & Pipeline",
         "tab4": "📝 Beskrivelser", "tab5": "📁 Medier & Noter",
         "f_id": "Client ID", "f_name": "Virksomhed", "f_cif": "CIF / VAT", "f_person": "Kontaktperson", "f_title": "Titel",
@@ -61,8 +61,8 @@ TRANSLATIONS = {
         "title": "Business CRM AI Pro", "login_title": "CRM Login", "login_btn": "LOG IN", "logout": "🚪 Log out",
         "search": "🔍 Search...", "total_leads": "Leads: {n}", "sidebar_scan": "📸 AI Scanner",
         "sidebar_filter": "🎯 Filters", "sidebar_admin": "🛠️ Admin", "sidebar_user": "👤 Users",
-        "sidebar_export": "📤 Export Selected", "sidebar_import": "📥 Import", "btn_create": "➕ CREATE MANUAL",
-        "btn_save": "💾 SAVE ALL", "btn_delete": "🗑️ DELETE", "btn_delete_sel": "🗑️ DELETE SELECTED",
+        "sidebar_export": "📤 Export", "sidebar_import": "📥 Import", "sidebar_master": "📄 Get Template", "btn_create": "➕ CREATE MANUAL",
+        "btn_save": "💾 SAVE ALL", "btn_delete": "🗑️ DELETE",
         "tab1": "📞 Contact", "tab2": "🌍 Geo", "tab3": "⚙️ Sales", "tab4": "📝 Desc", "tab5": "📁 Media",
         "f_id": "Client ID", "f_name": "Company", "f_cif": "CIF / VAT", "f_person": "Contact", "f_title": "Title",
         "f_mail": "Email", "f_phone": "Phone", "f_mobile": "Mobile", "f_wa": "WhatsApp", "f_tg": "Telegram",
@@ -98,6 +98,11 @@ INDUSTRIES = {
 AREA_TYPES = ["coast", "island", "inland", "city_area"]
 
 # --- 5. LOGIK MOTOR ---
+def get_safe_date(val):
+    if not val or str(val).lower() in ['nat', 'nan', 'none', '', '00:00:00']: return date.today()
+    try: return pd.to_datetime(val, dayfirst=True, errors='coerce').date() or date.today()
+    except: return date.today()
+
 MASTER_COLS = [
     'Date created', 'Company Name', 'CIF Number VAT', 'Brancher', 'Underbrancher', 'Område Type', 'Region', 'Area', 'Town', 
     'Postal Code', 'Address', 'Exact Location', 'Kontaktperson', 'Titel', 'Email', 
@@ -205,22 +210,22 @@ def lead_popup(idx):
     row = st.session_state.df_leads.loc[idx].to_dict()
     
     col_l1, col_l2 = st.columns([0.8, 0.2])
-    # ID er nu redigerbart som tekstfelt
     with col_l1: 
-        c_id = st.text_input(L['f_id'], value=row.get('Client ID', ''))
-        st.title(f"ID: {c_id} | {row.get('Company Name') or 'Lead'}")
+        # RETTELSE: Redigerbart ID felt
+        upd_id = st.text_input(L['f_id'], value=row.get('Client ID', ''))
+        st.title(f"ID: {upd_id} | {row.get('Company Name') or 'Lead'}")
     with col_l2: 
         if row.get('Logo_Data'): st.image(f"data:image/png;base64,{row['Logo_Data']}", width=100)
 
     st.divider()
     t1, t2, t3, t4, t5 = st.tabs([L['tab1'], L['tab2'], L['tab3'], L['tab4'], L['tab5']])
-    upd = {'Client ID': c_id}
+    upd = {'Client ID': upd_id}
     
     with t1:
         st.markdown(f"##### {L['tab1']}")
         ct1, ct2 = st.columns(2)
-        upd['Company Name'] = ct1.text_input(L['f_name'], value=row.get('Company Name', ''))
-        upd['CIF Number VAT'] = ct2.text_input(L['f_cif'], value=row.get('CIF Number VAT', ''))
+        upd['Company Name'] = ct1.text_input(L['f_name'], value=row.get('Company Name'))
+        upd['CIF Number VAT'] = ct2.text_input(L['f_cif'], value=row.get('CIF Number VAT'))
         st.divider()
         col1, col2 = st.columns(2)
         with col1:
@@ -235,7 +240,7 @@ def lead_popup(idx):
         st.markdown(f"##### {L['tab2']}")
         c1, c2 = st.columns(2)
         with c1:
-            upd['Område Type'] = c1.selectbox(L['f_type'], opts['area_types'], index=opts['area_types'].index(row.get('Område Type', '')) if row.get('Område Type') in opts['area_types'] else 0)
+            upd['Område Type'] = c1.selectbox(L['f_type'], opts['area_types'], index=opts['area_types'].index(row['Område Type']) if row['Område Type'] in opts['area_types'] else 0)
             upd['Region'] = c1.selectbox(L['f_reg'], opts['regions'], index=opts['regions'].index(row.get('Region')) if row.get('Region') in opts['regions'] else 0)
             upd['Town'] = c1.selectbox(L['f_town'], opts['towns'], index=opts['towns'].index(row.get('Town')) if row.get('Town') in opts['towns'] else 0)
             for f, lab in [('Area','f_area'), ('Address', 'f_addr'), ('Postal Code', 'f_zip')]:
@@ -308,12 +313,14 @@ with st.sidebar:
     st.session_state.lang_choice = st.selectbox("🌐 Choose Language", list(TRANSLATIONS.keys()))
     st.header(f"👤 {st.session_state.username}")
     
-    # Import / Flet
+    # RETTELSE: Import og Master skabelon
     uploaded_file = st.file_uploader(L['sidebar_import'], type=['csv', 'xlsx'])
     if uploaded_file:
         new_df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
         st.session_state.df_leads = pd.concat([st.session_state.df_leads, force_clean(new_df)], ignore_index=True)
         save_db(st.session_state.df_leads); st.rerun()
+    
+    st.download_button(L['sidebar_master'], pd.DataFrame(columns=MASTER_COLS).to_csv(index=False), "master_skabelon.csv", use_container_width=True)
 
     # AI SCANNER
     with st.expander(L['sidebar_scan']):
@@ -343,11 +350,12 @@ with st.sidebar:
             if st.button("💾 Add"):
                 with db_engine.begin() as conn: conn.execute(text("INSERT INTO crm_configs (type, value) VALUES (:t,:v)"), {"t":cat_ed, "v":v_new})
                 st.rerun()
-            if custom_opts[cat_ed]:
-                v_del = st.selectbox("Slet fra database:", ["Vælg..."] + custom_opts[cat_ed])
-                if v_del != "Vælg..." and st.button("🗑️ Slet"):
-                    with db_engine.begin() as conn: conn.execute(text("DELETE FROM crm_configs WHERE type=:t AND value=:v"), {"t":cat_ed, "v":v_del})
-                    st.rerun()
+            # RETTELSE: Viser nu værdier fra den valgte kategori, ikke kun agenter
+            options_to_show = opts[cat_ed]
+            v_del = st.selectbox("Slet fra database:", ["Vælg..."] + options_to_show)
+            if v_del != "Vælg..." and st.button("🗑️ Slet"):
+                with db_engine.begin() as conn: conn.execute(text("DELETE FROM crm_configs WHERE type=:t AND value=:v"), {"t":cat_ed, "v":v_del})
+                st.rerun()
             if st.button("🚨 Reset Database"):
                 with db_engine.begin() as conn: conn.execute(text("DROP TABLE IF EXISTS merchants_playground"))
                 st.session_state.df_leads = pd.DataFrame(columns=MASTER_COLS); st.rerun()
@@ -364,7 +372,6 @@ with st.sidebar:
         nr = {c: "" for c in MASTER_COLS}; nr['Date created'] = date.today().strftime('%d/%m/%Y'); nr['Client ID'] = nid
         st.session_state.df_leads = pd.concat([st.session_state.df_leads, pd.DataFrame([nr])], ignore_index=True)
         save_db(st.session_state.df_leads); st.rerun()
-    
     if st.button(L['logout'] if 'logout' in L else "Log ud"): st.session_state.authenticated = False; st.rerun()
 
 # --- 9. DASHBOARD ---
@@ -378,23 +385,25 @@ if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, c
 
 st.write(L['total_leads'].format(n=len(df_v)))
 
-# Multi-select knapper
-c1, c2 = st.columns([1, 10])
+# RETTELSE: Multi-select tabel med slet/download knapper
+col_btns = st.columns([1, 1, 10])
+sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="multi-row", key="table_data")
 
-# Tabel med Multi-select
-sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="multi-row", key="leads_table")
+# Håndtering af selection uden AttributeError
+selection_rows = sel.selection.get('rows', [])
 
-if c1.button(L['btn_delete_sel']):
-    if sel.selection.rows:
-        indices = df_v.iloc[sel.selection.rows].index
-        st.session_state.df_leads = st.session_state.df_leads.drop(indices)
+if col_btns[0].button("🗑️"):
+    if selection_rows:
+        indices_to_drop = df_v.iloc[selection_rows].index
+        st.session_state.df_leads = st.session_state.df_leads.drop(indices_to_drop)
         save_db(st.session_state.df_leads); st.rerun()
 
-if sel.selection.rows:
-    csv_data = df_v.iloc[sel.selection.rows].to_csv(index=False).encode('utf-8')
-    c2.download_button(L['sidebar_export'], csv_data, "valgte_leads.csv", use_container_width=True)
+if selection_rows:
+    csv_data = df_v.iloc[selection_rows].to_csv(index=False).encode('utf-8')
+    col_btns[1].download_button("📥", csv_data, "valgte_leads.csv")
 
-# Auto-open popup KUN ved enkelt-klik
-if sel.selection.rows and len(sel.selection.rows) == 1:
-    real_idx = df_v.index[sel.selection.rows[0]]
+# Åbn popup KUN ved enkeltklik, uafhængigt af checkbox-markering
+# Bemærk: Vi tjekker her på det sidste række-valg
+if selection_rows and len(selection_rows) == 1:
+    real_idx = df_v.index[selection_rows[0]]
     lead_popup(real_idx)
