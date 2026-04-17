@@ -72,6 +72,23 @@ TRANSLATIONS = {
         "f_adv": "Ads", "f_agent": "Agent", "f_src": "Source", "f_created": "Created", "f_follow": "Follow up",
         "f_last": "Last contact", "f_pitch": "Pitch", "f_desc": "Description", "f_qr": "QR URL", "f_notes": "Notes",
         "field_logo": "Logo", "field_docs": "Docs", "field_gal": "Gallery", "f_type": "Area Type"
+    },
+    "🇪🇸 Español": {
+        "title": "Business CRM Maestro AI", "login_title": "CRM Acceso", "login_btn": "INICIAR SESIÓN", "logout": "🚪 Cerrar sesión",
+        "search": "🔍 Buscar en todos los datos...", "total_leads": "Leads mostrados: {n}", "sidebar_scan": "📸 Escáner de Tarjetas AI",
+        "sidebar_filter": "🎯 Filtros de Campaña", "sidebar_admin": "🛠️ Control de Admin", "sidebar_user": "👤 Gestión de Usuarios",
+        "sidebar_export": "📤 Exportar", "sidebar_import": "📥 Importar / Fusionar", "sidebar_master": "📄 Obtener Plantilla Maestra", "btn_create": "➕ CREAR MANUALMENTE",
+        "btn_save": "💾 GUARDAR TODO EN CLIENTE", "btn_delete": "🗑️ ELIMINAR LEAD",
+        "tab1": "📞 Contacto y Social", "tab2": "🌍 Geografía e Industrias", "tab3": "⚙️ Ventas y Pipeline",
+        "tab4": "📝 Descripciones", "tab5": "📁 Medios y Notas",
+        "f_id": "ID de Cliente", "f_name": "Empresa", "f_cif": "CIF / IVA", "f_person": "Persona de Contacto", "f_title": "Título",
+        "f_mail": "Correo electrónico", "f_phone": "Teléfono", "f_mobile": "Móvil", "f_wa": "WhatsApp", "f_tg": "Telegram",
+        "f_fb": "Facebook", "f_ig": "Instagram", "f_web": "Sitio web", "f_reg": "Región", "f_area": "Área",
+        "f_town": "Ciudad", "f_addr": "Dirección", "f_zip": "Código Postal", "f_loc": "Enlace de Mapas", "f_br": "Industria",
+        "f_ubr": "Subindustria", "f_lang": "Idioma", "f_work": "Horas", "f_st": "Estado", "f_mem": "Miembro",
+        "f_adv": "Anuncio", "f_agent": "Agente", "f_src": "Fuente", "f_created": "Creado", "f_follow": "Seguimiento",
+        "f_last": "Último contacto", "f_pitch": "Pitch Corto", "f_desc": "Texto", "f_qr": "URL QR", "f_notes": "Notas",
+        "field_logo": "Logo", "field_docs": "Documentos", "field_gal": "Galería", "f_type": "Tipo de Área"
     }
 }
 
@@ -388,10 +405,10 @@ st.write(L['total_leads'].format(n=len(df_v)))
 # Knapper til bulk-handlinger
 col_b1, col_b2, _ = st.columns([0.5, 0.5, 9])
 
-# Forbered visning med en 'Select' kolonne og en 'Åbn' kolonne
+# Forbered visning med en 'Select' kolonne og en 'Vis' kolonne
 df_display = df_v[DISPLAY_COLS].copy()
 df_display.insert(0, "Select", False)
-df_display.insert(1, "Åbn", False) # Vi bruger en checkbox som en knap til at åbne kortet
+df_display.insert(1, "Vis", False) # Vi bruger en checkbox som en knap til at åbne kortet
 
 # Brug st.data_editor
 edited_df = st.data_editor(
@@ -400,31 +417,31 @@ edited_df = st.data_editor(
     hide_index=True,
     column_config={
         "Select": st.column_config.CheckboxColumn("Vælg", help="Vælg til bulk slet/download"),
-        "Åbn": st.column_config.CheckboxColumn("🔍", help="Klik her for at åbne lead-kortet")
+        "Vis": st.column_config.CheckboxColumn("👁️ Vis", help="Klik her for at åbne lead-kortet")
     },
     disabled=[c for c in DISPLAY_COLS],
-    key="data_editor_v4"
+    key="data_editor_v5"
 )
 
 # 1. Find rækker valgt til bulk-handlinger (Select)
 selected_bulk = edited_df.index[edited_df["Select"]].tolist()
 
-# 2. Find rækken der skal åbnes (Åbn)
-open_request = edited_df.index[edited_df["Åbn"]].tolist()
+# 2. Find rækken der skal åbnes (Vis)
+open_request = edited_df.index[edited_df["Vis"]].tolist()
 
 # Bulk Slet
 if col_b1.button("🗑️") and selected_bulk:
     st.session_state.df_leads = st.session_state.df_leads.drop(df_v.iloc[selected_bulk].index)
     save_db(st.session_state.df_leads); st.rerun()
 
-# Bulk Download (Rettet fix)
+# Bulk Download
 if selected_bulk:
     csv_data = df_v.iloc[selected_bulk].to_csv(index=False).encode('utf-8')
     col_b2.download_button("📥", data=csv_data, file_name=f"valgte_leads_{date.today()}.csv", mime="text/csv")
 else:
     col_b2.button("📥", disabled=True)
 
-# Åbn popup hvis 'Åbn' er markeret
+# Åbn popup hvis 'Vis' er markeret
 if open_request:
     # Vi åbner kun den første hvis flere er markeret ved en fejl
     lead_popup(df_v.index[open_request[0]])
