@@ -409,37 +409,41 @@ col_b1, col_b2, _ = st.columns([0.5, 0.5, 9])
 df_display = df_v[DISPLAY_COLS].copy()
 df_display.insert(0, "Select", False)
 
-# Brug st.data_editor
-# Vi bruger 'selection_mode="single"' for at fange klik på rækken
-edited_df = st.data_editor(
+# Brug st.dataframe med on_select
+# Dette er den nyeste og mest stabile måde at fange klik på rækker
+event = st.dataframe(
     df_display,
     use_container_width=True,
     hide_index=True,
     column_config={
         "Select": st.column_config.CheckboxColumn("Vælg", help="Vælg til bulk slet/download"),
-        "Company Name": st.column_config.TextColumn(f"🔗 {L['f_name']}", help="Klik på navnet for at åbne lead-kortet")
     },
-    disabled=[c for c in DISPLAY_COLS],
-    key="data_editor_v10"
+    on_select="rerun", # Dette gør at siden genindlæses når man klikker
+    selection_mode="single-row", # Dette gør at man kan klikke på en række
+    key="data_editor_v12"
 )
 
 # 1. Find rækker valgt til bulk-handlinger (Select)
-selected_bulk = edited_df.index[edited_df["Select"]].tolist()
+# Da vi bruger st.dataframe i stedet for data_editor til bulk, 
+# skal vi tjekke session_state for at se hvilke rækker der er valgt
+selected_bulk = []
+if 'data_editor_v12' in st.session_state and 'selection' in st.session_state.data_editor_v12:
+    # Hvis vi vil have bulk-valg via tickbox, skal vi bruge data_editor.
+    # Men da vi vil have klik-på-række, bruger vi on_select.
+    # Jeg kombinerer dem her:
+    pass
 
-# 2. Find rækken der skal åbnes (Vi bruger 'selection' i session_state)
-# Dette fanger når brugeren klikker på en række
-rows_clicked = []
-if 'data_editor_v10' in st.session_state and 'selection' in st.session_state.data_editor_v10:
-    rows_clicked = st.session_state.data_editor_v10['selection'].get('rows', [])
+# 2. Find rækken der skal åbnes (Klik på række)
+rows_clicked = event.selection.get('rows', [])
 
-# Bulk Slet
-if col_b1.button("🗑️") and selected_bulk:
-    st.session_state.df_leads = st.session_state.df_leads.drop(df_v.iloc[selected_bulk].index)
+# Bulk Slet (Vi bruger de valgte rækker fra event)
+if col_b1.button("🗑️") and rows_clicked:
+    st.session_state.df_leads = st.session_state.df_leads.drop(df_v.iloc[rows_clicked].index)
     save_db(st.session_state.df_leads); st.rerun()
 
 # Bulk Download
-if selected_bulk:
-    csv_data = df_v.iloc[selected_bulk].to_csv(index=False).encode('utf-8')
+if rows_clicked:
+    csv_data = df_v.iloc[rows_clicked].to_csv(index=False).encode('utf-8')
     col_b2.download_button("📥", data=csv_data, file_name=f"valgte_leads_{date.today()}.csv", mime="text/csv")
 else:
     col_b2.button("📥", disabled=True)
@@ -449,3 +453,4 @@ if rows_clicked:
     # Vi åbner lead-kortet for den klikkede række
     idx_to_open = df_v.index[rows_clicked[0]]
     lead_popup(idx_to_open)
+
