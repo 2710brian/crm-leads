@@ -408,28 +408,29 @@ col_b1, col_b2, _ = st.columns([0.5, 0.5, 9])
 # Forbered visning
 df_display = df_v[DISPLAY_COLS].copy()
 df_display.insert(0, "Select", False)
-# Vi bruger en speciel kolonne til åbning
-df_display.insert(1, "ÅBN", False)
 
 # Brug st.data_editor
+# Vi aktiverer 'selection_mode="single"' for at fange klik på rækken
 edited_df = st.data_editor(
     df_display,
     use_container_width=True,
     hide_index=True,
     column_config={
         "Select": st.column_config.CheckboxColumn("Vælg", help="Vælg til bulk slet/download"),
-        "ÅBN": st.column_config.CheckboxColumn("👁️ ÅBN", help="Sæt flueben her for at åbne lead-kortet")
+        "Company Name": st.column_config.TextColumn(f"🔗 {L['f_name']}", help="Klik på navnet for at åbne lead-kortet")
     },
     disabled=[c for c in DISPLAY_COLS],
-    key="data_editor_v8"
+    key="data_editor_v9"
 )
 
 # 1. Find rækker valgt til bulk-handlinger (Select)
 selected_bulk = edited_df.index[edited_df["Select"]].tolist()
 
-# 2. Find rækken der skal åbnes (ÅBN)
-# Vi tjekker direkte i edited_df for at se om 'ÅBN' er True
-to_open = edited_df.index[edited_df["ÅBN"]].tolist()
+# 2. Find rækken der skal åbnes (Vi bruger 'selection' i session_state)
+# Dette fanger når brugeren klikker på en række
+rows_clicked = []
+if 'data_editor_v9' in st.session_state and 'selection' in st.session_state.data_editor_v9:
+    rows_clicked = st.session_state.data_editor_v9['selection'].get('rows', [])
 
 # Bulk Slet
 if col_b1.button("🗑️") and selected_bulk:
@@ -443,7 +444,8 @@ if selected_bulk:
 else:
     col_b2.button("📥", disabled=True)
 
-# Åbn popup hvis 'ÅBN' er markeret
-if to_open:
-    # Vi åbner lead-kortet for den valgte række
-    lead_popup(df_v.index[to_open[0]])
+# Åbn popup hvis en række er klikket på
+if rows_clicked:
+    # Vi åbner lead-kortet for den klikkede række
+    idx_to_open = df_v.index[rows_clicked[0]]
+    lead_popup(idx_to_open)
