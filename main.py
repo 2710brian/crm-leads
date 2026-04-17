@@ -387,11 +387,19 @@ st.write(L['total_leads'].format(n=len(df_v)))
 
 # Knapper
 col_b1, col_b2, _ = st.columns([0.5, 0.5, 9])
-# Tabel med afkrydsning (multi-row)
-sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="multi-row", hide_index=True, key="table")
 
-# Håndtering af selection ved hjælp af session_state (virker i alle versioner)
-rows = st.session_state.table['selection']['rows'] if 'selection' in st.session_state.table else []
+# Tabel med afkrydsning (multi-row)
+# RETTELSE: Vi gemmer returværdien fra st.dataframe i 'sel' for at tilgå selection korrekt
+sel = st.dataframe(
+    df_v[DISPLAY_COLS], 
+    use_container_width=True, 
+    selection_mode="multi-row", 
+    hide_index=True, 
+    key="table"
+)
+
+# Håndtering af selection ved hjælp af det returnerede objekt (virker i nyeste Streamlit)
+rows = sel.selection.get('rows', [])
 
 if col_b1.button("🗑️") and rows:
     st.session_state.df_leads = st.session_state.df_leads.drop(df_v.iloc[rows].index)
