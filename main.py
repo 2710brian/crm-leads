@@ -209,8 +209,9 @@ opts, custom_opts = load_options()
 def lead_popup(idx):
     row = st.session_state.df_leads.loc[idx].to_dict()
     col_l1, col_l2 = st.columns([0.8, 0.2])
-    upd_id = st.text_input(L['f_id'], value=row.get('Client ID', ''))
-    with col_l1: st.title(f"ID: {upd_id} | {row.get('Company Name') or 'Lead'}")
+    with col_l1: 
+        upd_id = st.text_input(L['f_id'], value=row.get('Client ID', ''))
+        st.title(f"ID: {upd_id} | {row.get('Company Name') or 'Lead'}")
     with col_l2: 
         if row.get('Logo_Data'): st.image(f"data:image/png;base64,{row['Logo_Data']}", width=100)
 
@@ -316,7 +317,7 @@ with st.sidebar:
         new_df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
         st.session_state.df_leads = pd.concat([st.session_state.df_leads, force_clean(new_df)], ignore_index=True)
         save_db(st.session_state.df_leads); st.rerun()
-    
+        
     st.download_button(L['sidebar_master'], pd.DataFrame(columns=MASTER_COLS).to_csv(index=False), "master_skabelon.csv", use_container_width=True)
     
     # AI SCANNER
@@ -347,8 +348,8 @@ with st.sidebar:
             if st.button("💾 Add"):
                 with db_engine.begin() as conn: conn.execute(text("INSERT INTO crm_configs (type, value) VALUES (:t,:v)"), {"t":cat_ed, "v":v_new})
                 st.rerun()
-            # Rettelse: Viser nu værdier for den valgte kategori
-            v_del = st.selectbox("Slet fra database:", ["Vælg..."] + opts[cat_ed])
+            options_to_show = opts[cat_ed]
+            v_del = st.selectbox("Slet fra database:", ["Vælg..."] + options_to_show)
             if v_del != "Vælg..." and st.button("🗑️ Slet"):
                 with db_engine.begin() as conn: conn.execute(text("DELETE FROM crm_configs WHERE type=:t AND value=:v"), {"t":cat_ed, "v":v_del})
                 st.rerun()
@@ -382,29 +383,21 @@ if search: df_v = df_v[df_v.astype(str).apply(lambda x: x.str.contains(search, c
 st.write(L['total_leads'].format(n=len(df_v)))
 
 # Knapper
-col_k1, col_k2, _ = st.columns([0.5, 0.5, 9])
-sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="multi-row", key="table")
+col_b1, col_b2, _ = st.columns([0.5, 0.5, 9])
+sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="multi-row", hide_index=True, key="table")
 
-# RETTELSE: Undgå fejl ved at tjekke hvad sel.selection returnerer
-# Vi prøver at få fat i de valgte rækker via sel.selection
-try:
-    # I nyere versioner er selection en egenskab der returnerer en dict-lignende struktur
-    # Vi prøver at tilgå det dynamisk uden at kalde det som en funktion
-    sel_rows = sel.selection['rows']
-except:
-    sel_rows = []
+# Håndtering af selection
+sel_rows = sel.selection.get('rows', [])
 
-if col_k1.button("🗑️"):
-    if sel_rows:
-        indices = df_v.iloc[sel_rows].index
-        st.session_state.df_leads = st.session_state.df_leads.drop(indices)
-        save_db(st.session_state.df_leads); st.rerun()
+if col_b1.button("🗑️") and sel_rows:
+    indices = df_v.iloc[sel_rows].index
+    st.session_state.df_leads = st.session_state.df_leads.drop(indices)
+    save_db(st.session_state.df_leads); st.rerun()
 
-if col_k2.button("📥"):
-    if sel_rows:
-        csv = df_v.iloc[sel_rows].to_csv(index=False).encode('utf-8')
-        st.download_button("Hent", csv, "valgte_leads.csv")
+if col_b2.button("📥") and sel_rows:
+    csv = df_v.iloc[sel_rows].to_csv(index=False).encode('utf-8')
+    st.download_button("Hent", csv, "valgte_leads.csv")
 
-# Åbn popup ved enkelt-klik
-if len(sel_rows) == 1:
+# Åbn popup ved klik
+if sel_rows and len(sel_rows) == 1:
     lead_popup(df_v.index[sel_rows[0]])
