@@ -408,29 +408,30 @@ col_b1, col_b2, _ = st.columns([0.5, 0.5, 9])
 # Forbered visning med en 'Select' kolonne og en 'VIS' kolonne
 df_display = df_v[DISPLAY_COLS].copy()
 df_display.insert(0, "Select", False)
-df_display.insert(1, "VIS", "👁️ VIS") # Vi bruger teksten "👁️ VIS" i stedet for en checkbox
+df_display.insert(1, "VIS", "👁️ VIS")
 
-# Brug st.data_editor
+# Brug st.data_editor med row_selection aktiveret
+# Vi bruger 'selection_mode="single"' for at fange klik på rækken
 edited_df = st.data_editor(
     df_display,
     use_container_width=True,
     hide_index=True,
     column_config={
         "Select": st.column_config.CheckboxColumn("Vælg", help="Vælg til bulk slet/download"),
-        "VIS": st.column_config.TextColumn("👁️ VIS", help="Klik på teksten for at åbne lead-kortet", width="small")
+        "VIS": st.column_config.TextColumn("👁️ VIS", help="Klik på rækken for at åbne lead-kortet", width="small")
     },
-    disabled=[c for c in DISPLAY_COLS] + ["VIS"], # Gør alle kolonner undtagen 'Select' skrivebeskyttede
-    key="data_editor_v6"
+    disabled=[c for c in DISPLAY_COLS] + ["VIS"],
+    key="data_editor_v7"
 )
 
 # 1. Find rækker valgt til bulk-handlinger (Select)
 selected_bulk = edited_df.index[edited_df["Select"]].tolist()
 
-# 2. Find rækken der skal åbnes (Vi tjekker om brugeren har klikket på en række)
-# I Streamlit data_editor kan vi bruge 'selection' i session_state til at fange klik
+# 2. Find rækken der skal åbnes (Vi bruger 'selection' i session_state)
+# Dette fanger når brugeren klikker på en række
 rows_clicked = []
-if 'data_editor_v6' in st.session_state and 'selection' in st.session_state.data_editor_v6:
-    rows_clicked = st.session_state.data_editor_v6['selection'].get('rows', [])
+if 'data_editor_v7' in st.session_state and 'selection' in st.session_state.data_editor_v7:
+    rows_clicked = st.session_state.data_editor_v7['selection'].get('rows', [])
 
 # Bulk Slet
 if col_b1.button("🗑️") and selected_bulk:
@@ -446,4 +447,6 @@ else:
 
 # Åbn popup hvis en række er klikket på
 if rows_clicked:
-    lead_popup(df_v.index[rows_clicked[0]])
+    # Vi nulstiller selection efter åbning så den ikke popper op igen ved rerun
+    idx_to_open = df_v.index[rows_clicked[0]]
+    lead_popup(idx_to_open)
