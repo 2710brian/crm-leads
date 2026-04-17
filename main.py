@@ -351,7 +351,6 @@ with st.sidebar:
             if st.button("💾 Add"):
                 with db_engine.begin() as conn: conn.execute(text("INSERT INTO crm_configs (type, value) VALUES (:t,:v)"), {"t":cat_ed, "v":v_new})
                 st.rerun()
-            # Rettelse: Viser nu værdier for den valgte kategori
             options_to_show = opts[cat_ed]
             v_del = st.selectbox("Slet fra database:", ["Vælg..."] + options_to_show)
             if v_del != "Vælg..." and st.button("🗑️ Slet"):
@@ -388,23 +387,20 @@ st.write(L['total_leads'].format(n=len(df_v)))
 
 # Knapper
 col_b1, col_b2, _ = st.columns([0.5, 0.5, 9])
-# Tabel
-sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="multi-row", key="table")
+# Tabel med afkrydsning (multi-row)
+sel = st.dataframe(df_v[DISPLAY_COLS], use_container_width=True, selection_mode="multi-row", hide_index=True, key="table")
 
-# Håndtering af selection
-if col_b1.button("🗑️"):
-    rows = sel.selection.rows if hasattr(sel.selection, 'rows') else []
-    if rows:
-        st.session_state.df_leads = st.session_state.df_leads.drop(df_v.iloc[rows].index)
-        save_db(st.session_state.df_leads); st.rerun()
+# Håndtering af selection ved hjælp af session_state (virker i alle versioner)
+rows = st.session_state.table['selection']['rows'] if 'selection' in st.session_state.table else []
 
-if col_b2.button("📥"):
-    rows = sel.selection.rows if hasattr(sel.selection, 'rows') else []
-    if rows:
-        csv = df_v.iloc[rows].to_csv(index=False).encode('utf-8')
-        st.download_button("Hent", csv, "valgte.csv")
+if col_b1.button("🗑️") and rows:
+    st.session_state.df_leads = st.session_state.df_leads.drop(df_v.iloc[rows].index)
+    save_db(st.session_state.df_leads); st.rerun()
 
-# Pop-up
-rows = sel.selection.rows if hasattr(sel.selection, 'rows') else []
+if col_b2.button("📥") and rows:
+    csv = df_v.iloc[rows].to_csv(index=False).encode('utf-8')
+    st.download_button("Hent", csv, "valgte.csv")
+
+# Åbn popup ved klik på række
 if len(rows) == 1:
     lead_popup(df_v.index[rows[0]])
