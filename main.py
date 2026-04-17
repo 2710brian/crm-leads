@@ -102,7 +102,7 @@ INDUSTRIES = {
     "Ejendom": ["Køb bolig", "Sælge bolig", "Nybyggeri", "Investering", "Udlejning kort", "Udlejning lang"],
     "Turisme & ferie": ["Hoteller", "Ferieboliger", "Resorts", "Fly & transport", "Oplevelser"],
     "Transport": ["Biludlejning", "Luksusbiler", "Lufthavn transfer", "Leasing"],
-    "Juridisk & rådgivning": ["Advokat", "Skatterådgivning", "NIE nummer", "Residency"],
+    "Juridisk & rådgivning": ["Advokat", "Skatterådvining", "NIE nummer", "Residency"],
     "Finans & bank": ["Boliglån", "Bank", "Valuta exchange", "Forsikring"],
     "Bolig & renovation": ["Byggefirma", "Renovering", "Interiør", "Møbler", "Pool / have"],
     "Service & drift": ["Rengøring", "Property management", "Nøgleservice"],
@@ -405,52 +405,47 @@ st.write(L['total_leads'].format(n=len(df_v)))
 # Knapper til bulk-handlinger
 col_b1, col_b2, _ = st.columns([0.5, 0.5, 9])
 
-# Forbered visning
+# Forbered visning med to tickbokse
 df_display = df_v[DISPLAY_COLS].copy()
-df_display.insert(0, "Select", False)
+df_display.insert(0, "Select", False) # Til bulk slet/download
+df_display.insert(1, "👁️", False)    # Til at åbne lead-kortet
 
-# Brug st.dataframe med on_select
-# Dette er den nyeste og mest stabile måde at fange klik på rækker
-event = st.dataframe(
+# Brug st.data_editor til stabil tickboks-håndtering
+edited_df = st.data_editor(
     df_display,
     use_container_width=True,
     hide_index=True,
     column_config={
         "Select": st.column_config.CheckboxColumn("Vælg", help="Vælg til bulk slet/download"),
+        "👁️": st.column_config.CheckboxColumn("👁️", help="Sæt flueben for at se lead-kortet")
     },
-    on_select="rerun", # Dette gør at siden genindlæses når man klikker
-    selection_mode="single-row", # Dette gør at man kan klikke på en række
-    key="data_editor_v12"
+    disabled=[c for c in DISPLAY_COLS],
+    key="data_editor_v13"
 )
 
 # 1. Find rækker valgt til bulk-handlinger (Select)
-# Da vi bruger st.dataframe i stedet for data_editor til bulk, 
-# skal vi tjekke session_state for at se hvilke rækker der er valgt
-selected_bulk = []
-if 'data_editor_v12' in st.session_state and 'selection' in st.session_state.data_editor_v12:
-    # Hvis vi vil have bulk-valg via tickbox, skal vi bruge data_editor.
-    # Men da vi vil have klik-på-række, bruger vi on_select.
-    # Jeg kombinerer dem her:
-    pass
+selected_bulk_indices = edited_df.index[edited_df["Select"]].tolist()
 
-# 2. Find rækken der skal åbnes (Klik på række)
-rows_clicked = event.selection.get('rows', [])
+# 2. Find rækken der skal åbnes (👁️)
+to_open_indices = edited_df.index[edited_df["👁️"]].tolist()
 
-# Bulk Slet (Vi bruger de valgte rækker fra event)
-if col_b1.button("🗑️") and rows_clicked:
-    st.session_state.df_leads = st.session_state.df_leads.drop(df_v.iloc[rows_clicked].index)
+# Bulk Slet
+if col_b1.button("🗑️") and selected_bulk_indices:
+    # Vi bruger de faktiske index fra df_v for at undgå out-of-bounds
+    actual_indices_to_drop = df_v.index[selected_bulk_indices]
+    st.session_state.df_leads = st.session_state.df_leads.drop(actual_indices_to_drop)
     save_db(st.session_state.df_leads); st.rerun()
 
 # Bulk Download
-if rows_clicked:
-    csv_data = df_v.iloc[rows_clicked].to_csv(index=False).encode('utf-8')
+if selected_bulk_indices:
+    csv_data = df_v.iloc[selected_bulk_indices].to_csv(index=False).encode('utf-8')
     col_b2.download_button("📥", data=csv_data, file_name=f"valgte_leads_{date.today()}.csv", mime="text/csv")
 else:
     col_b2.button("📥", disabled=True)
 
-# Åbn popup hvis en række er klikket på
-if rows_clicked:
-    # Vi åbner lead-kortet for den klikkede række
-    idx_to_open = df_v.index[rows_clicked[0]]
+# Åbn popup hvis 👁️ er markeret
+if to_open_indices:
+    # Vi åbner lead-kortet for den første markerede række
+    idx_to_open = df_v.index[to_open_indices[0]]
     lead_popup(idx_to_open)
 
