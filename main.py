@@ -389,7 +389,6 @@ st.write(L['total_leads'].format(n=len(df_v)))
 col_b1, col_b2, _ = st.columns([0.5, 0.5, 9])
 
 # Tabel med afkrydsning (multi-row)
-# RETTELSE: Vi gemmer returværdien fra st.dataframe i 'sel' for at tilgå selection korrekt
 sel = st.dataframe(
     df_v[DISPLAY_COLS], 
     use_container_width=True, 
@@ -398,8 +397,20 @@ sel = st.dataframe(
     key="table"
 )
 
-# Håndtering af selection ved hjælp af det returnerede objekt (virker i nyeste Streamlit)
-rows = sel.selection.get('rows', [])
+# MEGET ROBUST HÅNDTERING AF SELECTION
+# Vi tjekker om 'sel.selection' er en funktion eller et objekt
+rows = []
+try:
+    if callable(sel.selection):
+        # Hvis det er en funktion, kalder vi den
+        rows = sel.selection().get('rows', [])
+    else:
+        # Hvis det er et objekt, bruger vi .get direkte
+        rows = sel.selection.get('rows', [])
+except:
+    # Hvis alt andet fejler, prøver vi session_state som backup
+    if 'table' in st.session_state and 'selection' in st.session_state.table:
+        rows = st.session_state.table['selection'].get('rows', [])
 
 if col_b1.button("🗑️") and rows:
     st.session_state.df_leads = st.session_state.df_leads.drop(df_v.iloc[rows].index)
