@@ -102,7 +102,7 @@ INDUSTRIES = {
     "Ejendom": ["Køb bolig", "Sælge bolig", "Nybyggeri", "Investering", "Udlejning kort", "Udlejning lang"],
     "Turisme & ferie": ["Hoteller", "Ferieboliger", "Resorts", "Fly & transport", "Oplevelser"],
     "Transport": ["Biludlejning", "Luksusbiler", "Lufthavn transfer", "Leasing"],
-    "Juridisk & rådgivning": ["Advokat", "Skatterådvining", "NIE nummer", "Residency"],
+    "Juridisk & rådgivning": ["Advokat", "Skatterådgivning", "NIE nummer", "Residency"],
     "Finans & bank": ["Boliglån", "Bank", "Valuta exchange", "Forsikring"],
     "Bolig & renovation": ["Byggefirma", "Renovering", "Interiør", "Møbler", "Pool / have"],
     "Service & drift": ["Rengøring", "Property management", "Nøgleservice"],
@@ -297,7 +297,11 @@ def lead_popup(idx):
         col_m1, col_m2 = st.columns(2)
         with col_m1:
             st.markdown(f"##### {L['field_logo']}")
-            if row.get('Logo_Data'): st.image(f"data:image/png;base64,{row['Logo_Data']}", width=150)
+            if row.get('Logo_Data'): 
+                st.image(f"data:image/png;base64,{row['Logo_Data']}", width=150)
+                if st.button("🗑️ Slet Logo", key=f"del_logo_{idx}"):
+                    st.session_state.df_leads.at[idx, 'Logo_Data'] = ""
+                    save_db(st.session_state.df_leads); st.rerun()
             l_up = st.file_uploader(L['field_logo'], type=['png','jpg'], key=f"lu_{idx}")
             if l_up: upd['Logo_Data'] = base64.b64encode(l_up.read()).decode()
         with col_m2:
@@ -305,19 +309,31 @@ def lead_popup(idx):
             if row.get('Fil_Data'):
                 st.markdown(f"📄 **{row['Fil_Navn']}**")
                 st.markdown(f'<a href="data:application/octet-stream;base64,{row["Fil_Data"]}" download="{row["Fil_Navn"]}">👉 Hent fil</a>', unsafe_allow_html=True)
+                if st.button("🗑️ Slet Fil", key=f"del_file_{idx}"):
+                    st.session_state.df_leads.at[idx, 'Fil_Navn'] = ""
+                    st.session_state.df_leads.at[idx, 'Fil_Data'] = ""
+                    save_db(st.session_state.df_leads); st.rerun()
             f_up = st.file_uploader(L['field_docs'], key=f"fu_{idx}")
             if f_up: upd['Fil_Navn'], upd['Fil_Data'] = f_up.name, base64.b64encode(f_up.read()).decode()
         st.divider()
         st.markdown(f"##### {L['field_gal']}")
         gal_up = st.file_uploader("Upload Galleri", accept_multiple_files=True, key=f"ga_{idx}")
         if gal_up:
-            gal_list = []
+            gal_list = json.loads(row.get('Gallery_Data', '[]')) if row.get('Gallery_Data') else []
             for f in gal_up: gal_list.append(base64.b64encode(f.read()).decode())
             upd['Gallery_Data'] = json.dumps(gal_list)
+        
         if row.get('Gallery_Data'):
             imgs = json.loads(row['Gallery_Data'])
-            g_cols = st.columns(3)
-            for i, img in enumerate(imgs): g_cols[i % 3].image(f"data:image/png;base64,{img}", use_container_width=True)
+            if imgs:
+                g_cols = st.columns(3)
+                for i, img in enumerate(imgs):
+                    with g_cols[i % 3]:
+                        st.image(f"data:image/png;base64,{img}", use_container_width=True)
+                        if st.button(f"🗑️ Slet #{i+1}", key=f"del_gal_{idx}_{i}"):
+                            imgs.pop(i)
+                            st.session_state.df_leads.at[idx, 'Gallery_Data'] = json.dumps(imgs)
+                            save_db(st.session_state.df_leads); st.rerun()
 
     if st.button(L['btn_save'], type="primary", use_container_width=True):
         for k,v in upd.items(): st.session_state.df_leads.at[idx, k] = v
@@ -420,7 +436,7 @@ edited_df = st.data_editor(
         "👁️": st.column_config.CheckboxColumn("👁️", help="Sæt flueben for at se lead-kortet")
     },
     disabled=[c for c in DISPLAY_COLS],
-    key="data_editor_v13"
+    key="data_editor_v14"
 )
 
 # 1. Find rækker valgt til bulk-handlinger (Select)
@@ -431,7 +447,6 @@ to_open_indices = edited_df.index[edited_df["👁️"]].tolist()
 
 # Bulk Slet
 if col_b1.button("🗑️") and selected_bulk_indices:
-    # Vi bruger de faktiske index fra df_v for at undgå out-of-bounds
     actual_indices_to_drop = df_v.index[selected_bulk_indices]
     st.session_state.df_leads = st.session_state.df_leads.drop(actual_indices_to_drop)
     save_db(st.session_state.df_leads); st.rerun()
@@ -445,7 +460,5 @@ else:
 
 # Åbn popup hvis 👁️ er markeret
 if to_open_indices:
-    # Vi åbner lead-kortet for den første markerede række
     idx_to_open = df_v.index[to_open_indices[0]]
     lead_popup(idx_to_open)
-
