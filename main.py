@@ -19,7 +19,7 @@ def get_engine():
     if not db_url: return None
     if db_url.startswith("postgres://"): db_url = db_url.replace("postgres://", "postgresql://", 1)
     try:
-        engine = create_engine(db_url, pool_size=20, max_overflow=30, pool_pre_ping=True)
+        engine = create_engine(db_url, pool_size=5, max_overflow=10, pool_pre_ping=True, pool_recycle=3600, connect_args={'connect_timeout': 10})
         with engine.begin() as conn:
             conn.execute(text("CREATE TABLE IF NOT EXISTS merchants_playground (id SERIAL PRIMARY KEY, client_id INTEGER, data JSONB)"))
             conn.execute(text("CREATE TABLE IF NOT EXISTS crm_configs (id SERIAL PRIMARY KEY, type TEXT, value TEXT)"))
@@ -185,7 +185,7 @@ if not st.session_state.authenticated:
     with col:
         st.text_input("User", key="l_u")
         st.text_input("Pass", type="password", key="l_p")
-        st.button(L_log['login_btn'], type="primary", use_container_width=True, on_click=check_login)
+        st.button(L_log['login_btn'], type="primary", width='stretch', on_click=check_login)
     st.stop()
 
 L = TRANSLATIONS[st.session_state.lang_choice]
@@ -329,16 +329,16 @@ def lead_popup(idx):
                 g_cols = st.columns(3)
                 for i, img in enumerate(imgs):
                     with g_cols[i % 3]:
-                        st.image(f"data:image/png;base64,{img}", use_container_width=True)
+                        st.image(f"data:image/png;base64,{img}", width='stretch')
                         if st.button(f"🗑️ Slet #{i+1}", key=f"del_gal_{idx}_{i}"):
                             imgs.pop(i)
                             st.session_state.df_leads.at[idx, 'Gallery_Data'] = json.dumps(imgs)
                             save_db(st.session_state.df_leads); st.rerun()
 
-    if st.button(L['btn_save'], type="primary", use_container_width=True):
+    if st.button(L['btn_save'], type="primary", width='stretch'):
         for k,v in upd.items(): st.session_state.df_leads.at[idx, k] = v
         if save_db(st.session_state.df_leads): st.rerun()
-    if st.session_state.user_role == "admin" and st.button(L['btn_delete'], type="secondary", use_container_width=True):
+    if st.session_state.user_role == "admin" and st.button(L['btn_delete'], type="secondary", width='stretch'):
         st.session_state.df_leads = st.session_state.df_leads.drop(idx)
         save_db(st.session_state.df_leads); st.rerun()
 
@@ -354,7 +354,7 @@ with st.sidebar:
         st.session_state.df_leads = pd.concat([st.session_state.df_leads, force_clean(new_df)], ignore_index=True)
         save_db(st.session_state.df_leads); st.rerun()
     
-    st.download_button(L['sidebar_master'], pd.DataFrame(columns=MASTER_COLS).to_csv(index=False), "master_skabelon.csv", use_container_width=True)
+    st.download_button(L['sidebar_master'], pd.DataFrame(columns=MASTER_COLS).to_csv(index=False), "master_skabelon.csv", width='stretch')
     
     # AI SCANNER
     with st.expander(L['sidebar_scan']):
@@ -399,7 +399,7 @@ with st.sidebar:
     f_re = st.multiselect(L['f_reg'], opts['regions'])
 
     st.divider()
-    if st.button(L['btn_create'], type="primary", use_container_width=True):
+    if st.button(L['btn_create'], type="primary", width='stretch'):
         nums = pd.to_numeric(st.session_state.df_leads['Client ID'], errors='coerce').dropna()
         nid = int(nums.max() + 1) if not nums.empty else 1001
         nr = {c: "" for c in MASTER_COLS}; nr['Date created'] = date.today().strftime('%d/%m/%Y'); nr['Client ID'] = nid
@@ -429,7 +429,7 @@ df_display.insert(1, "👁️", False)    # Til at åbne lead-kortet
 # Brug st.data_editor til stabil tickboks-håndtering
 edited_df = st.data_editor(
     df_display,
-    use_container_width=True,
+    width='stretch',
     hide_index=True,
     column_config={
         "Select": st.column_config.CheckboxColumn("Vælg", help="Vælg til bulk slet/download"),
